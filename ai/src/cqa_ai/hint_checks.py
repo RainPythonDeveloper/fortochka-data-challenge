@@ -47,3 +47,34 @@ def check_hints(
             and HINT_CONFLICT_FLAG not in result.review_flags
         ):
             result.review_flags.append(HINT_CONFLICT_FLAG)
+
+
+def _fact_turns(facts: ConversationFacts) -> dict[str, set[int]]:
+    turns: dict[str, set[int]] = {
+        "первая реплика оператора": {facts.first_operator_turn},
+        "последняя реплика оператора": {facts.last_operator_turn},
+        "событие завершения": {facts.end_event_turn},
+        "передача оператору": {facts.escalation_turn},
+        "подтверждение личности": set(facts.identity_confirmed_turns),
+        "реплики клиента до оператора": set(
+            facts.client_turns_before_operator + facts.client_turns_while_waiting
+        ),
+        "просьба подождать": set(facts.operator_wait_turns),
+        "пауза больше 3 минут": {p.to_turn for p in facts.long_pauses},
+        "личный контакт или оплата": set(facts.personal_contact_turns),
+        "удержание": {
+            i for r in facts.hold_ranges for i in range(r.from_turn, r.to_turn + 1)
+        },
+    }
+    return {name: {t for t in found if t is not None} for name, found in turns.items()}
+
+
+def attach_facts_used(results: list[CriterionResult], facts: ConversationFacts) -> None:
+    """Record which code facts (W6) sit on the turns a decision cites."""
+    fact_turns = _fact_turns(facts)
+    for result in results:
+        cited = {e.turn_index for e in result.evidence}
+        if result.expected_at_turn is not None:
+            cited.add(result.expected_at_turn)
+        used = [name for name, found in fact_turns.items() if found & cited]
+        result.facts_used = used or None

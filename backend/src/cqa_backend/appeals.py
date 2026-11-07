@@ -87,6 +87,14 @@ def _apply_change(
             "answer": body.new_answer,
             "justification": body.reason,
             "review_flags": [*base.get("review_flags", []), DECISION_FLAG],
+            # The reviewer decided, not the model: its reasoning no longer applies.
+            "analysis": None,
+            "rule_ref": None,
+            "rule_text": None,
+            "alternative": None,
+            "facts_used": None,
+            "votes": None,
+            "confidence": None,
         }
     )
     final = [item for item in results if item.criterion_id != criterion_id] + [changed]

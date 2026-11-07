@@ -27,6 +27,8 @@ class ProviderResponse:
     input_tokens: int | None = None
     output_tokens: int | None = None
     truncated: bool = False
+    # Rate-limit waits inside the provider (extra output-mode requests).
+    queue_wait_ms: int = 0
 
 
 class Provider(Protocol):

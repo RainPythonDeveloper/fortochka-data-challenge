@@ -204,3 +204,61 @@ def test_self_check_sends_traps_and_flags_changes(chat, checklist):
     c07 = next(r for r in output.results if r.criterion_id == "c07")
     assert c07.answer == "no" and "self_check_changed" in c07.review_flags
     assert c07.confidence == 0.5 and "low_confidence" in c07.review_flags
+
+
+def test_facts_first_extracts_then_grades_with_the_facts(chat, checklist):
+    from cqa_ai.strategies import run_facts_first
+
+    facts = {
+        "client_questions": [{"turn": 0, "question": "где тариф", "answered": "yes", "answer_turn": 4}],
+        "wait_requests": [], "identity_check_turn": -1, "disclosed_account_data_turns": [],
+        "operator_contradictions": [], "client_repeats": [],
+        "closing": {"turn": 6, "summary": "no", "offer_of_help": "no", "farewell": "yes"},
+    }
+
+    class TwoStep(ScriptedProvider):
+        async def complete(self, *, system, user, schema, config):
+            if "client_questions" in schema.get("properties", {}):
+                self.users.append(user)
+                return ProviderResponse(text=json.dumps(facts, ensure_ascii=False), model=config.model)
+            return await super().complete(system=system, user=user, schema=schema, config=config)
+
+    provider = TwoStep()
+    output = asyncio.run(run_facts_first(chat, checklist, CONFIG, provider))
+    assert output.extracted_facts == facts
+    assert "ФАКТЫ, ИЗВЛЕЧЁННЫЕ ПЕРВЫМ ПРОХОДОМ" in provider.users[-1]
+    assert "Вопрос клиента [0]" in provider.users[-1]
+    assert [a.role for a in output.attempts][:1] == ["facts"]
+    assert len(output.results) == len(checklist.criteria)
+
+
+def test_facts_first_survives_a_broken_extraction(chat, checklist):
+    from cqa_ai.strategies import run_facts_first
+
+    class Broken(ScriptedProvider):
+        async def complete(self, *, system, user, schema, config):
+            if "client_questions" in schema.get("properties", {}):
+                return ProviderResponse(text="not json", model=config.model)
+            return await super().complete(system=system, user=user, schema=schema, config=config)
+
+    output = asyncio.run(run_facts_first(chat, checklist, CONFIG, Broken()))
+    assert output.extracted_facts is None
+    assert "facts_unavailable" in output.review_reasons
+    assert all(r.status is ResultStatus.ASSESSED or r.status is ResultStatus.NOT_APPLICABLE for r in output.results)
+
+
+def test_facts_first_survives_a_malformed_extraction_shape(chat, checklist):
+    from cqa_ai.strategies import run_facts_first
+
+    bad = {"client_questions": "x", "closing": "yes", "identity_check_turn": None}
+
+    class Odd(ScriptedProvider):
+        async def complete(self, *, system, user, schema, config):
+            if "client_questions" in schema.get("properties", {}):
+                return ProviderResponse(text=json.dumps(bad), model=config.model)
+            return await super().complete(system=system, user=user, schema=schema, config=config)
+
+    output = asyncio.run(run_facts_first(chat, checklist, CONFIG, Odd()))
+    assert output.extracted_facts is None
+    assert "facts_unavailable" in output.review_reasons
+    assert len(output.results) == len(checklist.criteria)

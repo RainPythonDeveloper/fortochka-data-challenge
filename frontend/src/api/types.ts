@@ -55,6 +55,10 @@ export type CriterionResult = {
   /** W7 decision trace. Optional: older runs do not have it. */
   analysis?: string | null;
   rule_ref?: string | null;
+  /** The rubric text rule_ref points to, as the model saw it. */
+  rule_text?: string | null;
+  /** Code facts (greeting, escalation, waits, closing…) on the turns the decision cites. */
+  facts_used?: string[] | null;
   alternative?: string | null;
   confidence?: number | null;
   votes?: JudgeVote[] | null;

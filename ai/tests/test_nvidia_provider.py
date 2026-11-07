@@ -132,3 +132,19 @@ def test_auth_and_removed_models_are_permanent(status):
 def test_truncated_output_is_reported():
     provider, _ = make(lambda r, n: httpx.Response(200, json=completion("{", "length")))
     assert complete(provider).truncated
+
+
+def test_a_remembered_mode_that_is_later_rejected_falls_through_to_others():
+    def handler(request, n):
+        # 1: guided_json accepted; 2: guided_json rejected now; 3: response_format accepted
+        if n == 2:
+            return httpx.Response(400, json={"detail": "guided decoding unavailable"})
+        return httpx.Response(200, json=completion())
+
+    provider, requests = make(handler)
+    complete(provider)
+    complete(provider)
+    assert len(requests) == 3
+    assert "nvext" in requests[1] and "response_format" in requests[2]
+    # One rejection does not demote the remembered, stronger mode.
+    assert nvidia_provider._accepted_mode[("nvidia", "google/gemma-4-31b-it")] == "guided_json"

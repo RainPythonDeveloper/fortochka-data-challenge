@@ -37,9 +37,15 @@ def vote_confidence(votes: list[JudgeVote], chosen: CriterionResult) -> float:
     return round(counts.get(key, 0) / len(votes), 2) if votes else 1.0
 
 
-def assign_confidence(results: list[CriterionResult], run_flags: list[str]) -> None:
+def assign_confidence(
+    results: list[CriterionResult], run_flags: list[str], only_voted: bool = False
+) -> None:
+    """`only_voted` recomputes only criteria with votes, keeping the confidence an
+    earlier single run gave the rest (with its repair and fallback penalties)."""
     run_penalty = sum(_PENALTIES_RUN.get(flag, 0) for flag in set(run_flags))
     for result in results:
+        if only_voted and not result.votes and result.confidence is not None:
+            continue
         if result.status is ResultStatus.FAILED:
             result.confidence = 0.0
             continue

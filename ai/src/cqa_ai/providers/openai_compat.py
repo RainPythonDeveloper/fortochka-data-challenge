@@ -21,7 +21,7 @@ from cqa_ai.providers.base import (
     TransientProviderError,
 )
 from cqa_ai.providers.profiles import ProviderProfile, paid_equivalent_usd
-from cqa_ai.providers.ratelimit import limiter_for
+from cqa_ai.providers.ratelimit import DailyLimitExhausted, limiter_for
 
 # Free endpoints are reported to hang for minutes, so a stuck call must end.
 DEFAULT_TIMEOUT_SECONDS = 240.0
@@ -53,6 +53,12 @@ def _retry_after(error: openai.APIStatusError) -> float | None:
         return None
 
 
+def _estimate_tokens(system: str, user: str, config: EvaluatorConfig) -> int:
+    """Rough token count for TPM budgeting: about 3 characters per token for
+    Cyrillic-heavy text, plus a typical answer."""
+    return (len(system) + len(user)) // 3 + min(config.max_output_tokens, 4000)
+
+
 def _is_loopback(url: str) -> bool:
     from urllib.parse import urlparse
 
@@ -82,8 +88,14 @@ class OpenAICompatProvider:
             http_client=http_client,
         )
 
-    async def acquire_slot(self) -> int:
-        return await limiter_for(self.name, self.profile.rpm).acquire()
+    async def acquire_slot(self, tokens: int = 0) -> int:
+        limiter = limiter_for(self.name, self.profile.rpm, self.profile.tpm, self.profile.rpd)
+        try:
+            return await limiter.acquire(tokens)
+        except DailyLimitExhausted as error:
+            # Permanent for today. The limiter is per provider, so only a fallback on
+            # another provider can still answer; same-provider fallbacks fail fast too.
+            raise PermanentProviderError(f"{self.name}: {error}") from error
 
     def cost_of(
         self, model: str, input_tokens: int | None, output_tokens: int | None
@@ -105,9 +117,19 @@ class OpenAICompatProvider:
     ) -> ProviderResponse:
         label = self.name.upper() if self.name == "nvidia" else self.name
         known = _accepted_mode.get((self.name, config.model))
-        modes = (known,) if known else self.profile.json_modes
+        # A remembered mode goes first; if the endpoint now rejects it (a changed
+        # deployment, a context it cannot constrain), the other modes still get a try.
+        modes = (
+            (known, *(m for m in self.profile.json_modes if m != known))
+            if known
+            else self.profile.json_modes
+        )
         rejected: openai.APIStatusError | None = None
-        for mode in modes:
+        extra_wait_ms = 0
+        for position, mode in enumerate(modes):
+            if position:
+                # Each extra HTTP request takes its own rate-limit slot.
+                extra_wait_ms += await self.acquire_slot(_estimate_tokens(system, user, config))
             try:
                 response = await self._client.chat.completions.create(
                     model=config.model,
@@ -137,7 +159,10 @@ class OpenAICompatProvider:
                     f"{label} refused the call, {error.status_code}: {error.message}"
                 ) from error
 
-            _accepted_mode[(self.name, config.model)] = mode
+            # Remember a mode only when none was remembered: one odd 400 (an oversized
+            # context, a hiccup) must not demote every later call to a weaker mode.
+            if not known:
+                _accepted_mode[(self.name, config.model)] = mode
             choice = response.choices[0]
             usage = response.usage
             return ProviderResponse(
@@ -146,5 +171,6 @@ class OpenAICompatProvider:
                 input_tokens=usage.prompt_tokens if usage else None,
                 output_tokens=usage.completion_tokens if usage else None,
                 truncated=choice.finish_reason == "length",
+                queue_wait_ms=extra_wait_ms,
             )
         raise PermanentProviderError(f"{label} rejected every output mode: {rejected}")

@@ -23,7 +23,7 @@ from cqa_ai.contracts import (
     ResultStatus,
     TurnRange,
 )
-from cqa_ai.rubric import NA_ANSWER, UNASSESSABLE_ANSWER, allowed_answers
+from cqa_ai.rubric import NA_ANSWER, UNASSESSABLE_ANSWER, allowed_answers, effective_notes
 
 _SPACES = re.compile(r"\s+")
 
@@ -110,6 +110,27 @@ def _check_evidence(
             flags.append("evidence_internal_turn")
         evidence.append(Evidence(turn_index=index, quote=quote))
     return evidence
+
+
+def rule_text(criterion: Criterion, ref: str) -> str | None:
+    """The rubric text a rule reference points to, numbered as in the prompt."""
+    ref = ref.strip()
+    if ref == "yes_when":
+        return criterion.yes_when
+    if ref == "na_when":
+        return criterion.na_when
+    if ref == "prompt":
+        return criterion.prompt
+    match = re.fullmatch(r"level:(-?\d+)", ref)
+    if match:
+        value = int(match.group(1))
+        return next((level.text for level in criterion.levels if level.value == value), None)
+    match = re.fullmatch(r"note:(\d+)", ref)
+    if match:
+        notes = effective_notes(criterion)
+        number = int(match.group(1))
+        return notes[number - 1] if 1 <= number <= len(notes) else None
+    return None
 
 
 def _turn_or_none(value: Any, snapshot: ConversationSnapshot) -> int | None:
@@ -206,6 +227,7 @@ def validate_response(
                 review_flags=flags,
                 analysis=str(item.get("analysis") or "").strip() or None,
                 rule_ref=str(item.get("rule_ref") or "").strip() or None,
+                rule_text=rule_text(criterion, str(item.get("rule_ref") or "")),
                 alternative=str(item.get("higher_level_blocker") or "").strip() or None,
             )
         )

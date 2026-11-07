@@ -2831,5 +2831,11 @@
   "chats": 15,
   "before_adjudication": "105/120",
   "after_adjudication": "106/120"
+ },
+ "kz_crosscheck": {
+  "chats": 15,
+  "agreement": "111/120",
+  "annotator": "independent model-family annotator reading Kazakh",
+  "note": "Disagreements only on known borderline cells (c04 levels, c06 7 vs 4, kz-008 c05/c07); labels kept."
  }
 }

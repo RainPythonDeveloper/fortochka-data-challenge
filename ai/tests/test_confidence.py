@@ -77,3 +77,31 @@ def test_pipeline_keeps_trace_fields(chat, checklist):
     assert c06.alternative == "клиент переспросил"
     assert c06.analysis == "Коротко."
     assert all(r.confidence is not None for r in output.results)
+
+
+def test_only_voted_keeps_the_single_run_confidence_of_other_criteria():
+    kept = result(answer="no")
+    kept.confidence = 0.6  # e.g. penalised for a contract repair in its own run
+    voted = result(
+        answer="yes",
+        votes=[
+            JudgeVote(model="a", status=ResultStatus.ASSESSED, answer="yes"),
+            JudgeVote(model="b", status=ResultStatus.ASSESSED, answer="yes"),
+        ],
+    )
+    assign_confidence([kept, voted], [], only_voted=True)
+    assert kept.confidence == 0.6
+    assert voted.confidence == 1.0
+
+
+def test_trace_resolves_the_rule_text_and_the_code_facts(chat, checklist):
+    reply = model_reply(checklist, {"c06": {"answer": "7", "rule_ref": "level:7"}, "c07": {"rule_ref": "note:1"}})
+    output = asyncio.run(
+        run_single(chat, checklist, EvaluatorConfig(provider="fake", model="m"), OneReply(reply))
+    )
+    by = {r.criterion_id: r for r in output.results}
+    c06_levels = {lv.value: lv.text for lv in next(c for c in checklist.criteria if c.id == "c06").levels}
+    assert by["c06"].rule_text == c06_levels[7]
+    assert by["c07"].rule_text and by["c07"].rule_text.startswith("Условие состоит из двух частей")
+    # model_reply cites turn 4, the operator's first turn in the synthetic chat
+    assert "первая реплика оператора" in (by["c01"].facts_used or [])

@@ -24,6 +24,7 @@ CONFIGS = [
     ("vote: 3 прогона, большинство", "s10-vote"),
     ("second_opinion: Super-VL по c07,c08", "s11-second-opinion"),
     ("self_check: самопроверка", "s12-self-check"),
+    ("facts_first: сначала факты", "s13-facts-first"),
 ]
 COLS = ["dialogues", "failed", "all_acc", "c02_acc", "c04_acc", "c05_acc", "c06_acc", "c07_acc",
         "c08_acc", "MAE", "max_err", "p50_s", "p95_s", "calls_per_dialogue",

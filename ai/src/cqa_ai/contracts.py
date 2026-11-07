@@ -155,6 +155,8 @@ class CriterionResult(BaseModel):
     # W7 decision trace. All optional, so older results and clients stay valid.
     analysis: str | None = None  # the model's short reasoning before the answer
     rule_ref: str | None = None  # "yes_when" | "na_when" | "level:15" | "note:2" | "prompt"
+    rule_text: str | None = None  # the rubric text rule_ref points to, as the model saw it
+    facts_used: list[str] | None = None  # code facts (W6) whose turns the decision cites
     alternative: str | None = None  # scales: what kept the answer from the next level up
     confidence: float | None = None  # 0..1, computed in code, never by the model
     votes: list[JudgeVote] | None = None  # each judge or repeat, when there were several
@@ -249,3 +251,5 @@ class EvaluationOutput(BaseModel):
     prompt_hash: str = ""
     review_status: ReviewStatus = ReviewStatus.CLEAR
     review_reasons: list[str] = Field(default_factory=list)
+    # facts_first: what the first call extracted, kept for the trace (W7).
+    extracted_facts: dict[str, Any] | None = None

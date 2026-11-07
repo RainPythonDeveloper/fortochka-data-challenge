@@ -2606,3 +2606,8 @@ mark.quote {
 .trace__analysis summary {
   cursor: pointer;
 }
+
+.trace__rule {
+  color: var(--color-text);
+  font-style: italic;
+}

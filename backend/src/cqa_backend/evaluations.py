@@ -377,6 +377,9 @@ class EvaluationService:
             "evaluator": evaluator_log,
             "stages": evaluator_stages(output.attempts, evaluator_ms),
         }
+        if output.extracted_facts is not None:
+            # facts_first: the first call's notes stay in the run log for review (W7).
+            log["extracted_facts"] = output.extracted_facts
         # `evaluate` reports a model failure or a refusal to send a call as a result with
         # every criterion failed. Nothing was assessed, so there is no score to keep.
         if all(item.status is ResultStatus.FAILED for item in output.results):

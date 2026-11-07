@@ -83,3 +83,44 @@ def test_local_profile_on_a_remote_host_may_not_see_calls(monkeypatch):
     assert OpenAICompatProvider(PROFILES["local"]).allows_personal_data is False
     monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434/v1")
     assert OpenAICompatProvider(PROFILES["local"]).allows_personal_data is True
+
+
+def test_tpm_budget_delays_a_request_that_would_exceed_it(monkeypatch):
+    from cqa_ai.providers import ratelimit
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(ratelimit.time, "monotonic", lambda: clock["t"])
+
+    async def sleep(seconds):
+        clock["t"] += seconds
+
+    monkeypatch.setattr(ratelimit.asyncio, "sleep", sleep)
+
+    async def run():
+        limiter = RateLimiter(rpm=600, tpm=10_000)
+        first = await limiter.acquire(8_000)
+        second = await limiter.acquire(8_000)  # would exceed 10k within 60 s
+        return first, second
+
+    first, second = asyncio.run(run())
+    assert first == 0
+    assert second >= 59_000
+
+
+def test_daily_limit_turns_into_a_permanent_error(monkeypatch):
+    from cqa_ai.contracts import EvaluatorConfig
+    from cqa_ai.providers import PermanentProviderError
+    from cqa_ai.providers.profiles import ProviderProfile
+
+    profile = ProviderProfile(
+        name="tiny", base_url="http://127.0.0.1:1/v1", key_env=None,
+        json_modes=("prompt_only",), rpm=600, rpd=1,
+    )
+    provider = OpenAICompatProvider(profile)
+
+    async def run():
+        await provider.acquire_slot()
+        await provider.acquire_slot()
+
+    with pytest.raises(PermanentProviderError, match="daily limit"):
+        asyncio.run(run())

@@ -157,7 +157,7 @@ function Trace({ result, criterion }: { result: CriterionResult; criterion: Crit
   const rule = ruleText(result.rule_ref);
   const confidence = result.confidence;
   const votes = result.votes ?? [];
-  if (!rule && confidence == null && !result.alternative && !votes.length && !result.analysis) return null;
+  if (!rule && confidence == null && !result.alternative && !votes.length && !result.analysis && !result.facts_used?.length) return null;
   return (
     <div className="trace">
       <p className="why__label">Трасса решения</p>
@@ -168,7 +168,15 @@ function Trace({ result, criterion }: { result: CriterionResult; criterion: Crit
           {confidence < 0.67 ? ' · нужен взгляд проверяющего' : ''}
         </p>
       )}
-      {rule && <p className="why__small">Решило правило: {rule}</p>}
+      {rule && (
+        <p className="why__small">
+          Решило правило: {rule}
+          {result.rule_text ? <span className="trace__rule"> — «{result.rule_text}»</span> : null}
+        </p>
+      )}
+      {result.facts_used && result.facts_used.length > 0 && (
+        <p className="why__small">Опора на факты кода: {result.facts_used.join(', ')}</p>
+      )}
       {result.alternative && criterion.type === 'scale' && (
         <p className="why__small">Почему не выше: {result.alternative}</p>
       )}
