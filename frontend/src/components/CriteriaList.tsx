@@ -10,7 +10,7 @@ import type {
   SectionScore,
   Turn,
 } from '../api/types';
-import { fmtNumber, fmtScore, speakerLabel, visibleFlags } from '../lib/format';
+import { fmtNumber, fmtScore, ruleText, speakerLabel, visibleFlags } from '../lib/format';
 import { AnswerBadge } from './AnswerBadge';
 import { AppealBlock } from './AppealBlock';
 import { Collapse } from './ui';
@@ -146,6 +146,53 @@ function Rule({ criterion, result, version }: { criterion: Criterion; result: Cr
   );
 }
 
+function confidenceTone(value: number): string {
+  if (value >= 0.85) return 'var(--color-green-text, #1f6b43)';
+  if (value >= 0.67) return 'var(--color-amber-text)';
+  return 'var(--color-red-text, #b42318)';
+}
+
+/** Why the evaluator decided this way: rule, confidence, judges, what blocked a higher level. */
+function Trace({ result, criterion }: { result: CriterionResult; criterion: Criterion }) {
+  const rule = ruleText(result.rule_ref);
+  const confidence = result.confidence;
+  const votes = result.votes ?? [];
+  if (!rule && confidence == null && !result.alternative && !votes.length && !result.analysis) return null;
+  return (
+    <div className="trace">
+      <p className="why__label">Трасса решения</p>
+      {confidence != null && (
+        <p className="why__small">
+          Уверенность:{' '}
+          <b style={{ color: confidenceTone(confidence) }}>{Math.round(confidence * 100)}%</b>
+          {confidence < 0.67 ? ' · нужен взгляд проверяющего' : ''}
+        </p>
+      )}
+      {rule && <p className="why__small">Решило правило: {rule}</p>}
+      {result.alternative && criterion.type === 'scale' && (
+        <p className="why__small">Почему не выше: {result.alternative}</p>
+      )}
+      {votes.length > 1 && (
+        <ul className="trace__votes">
+          {votes.map((vote, index) => (
+            <li key={`${vote.model}-${index}`} className="why__small">
+              {index === 2 && result.review_flags.includes('arbitrated') ? 'Арбитр' : `Голос ${index + 1}`} ·{' '}
+              <span className="trace__model">{vote.model.split('/').pop()}</span>:{' '}
+              <AnswerBadge criterion={criterion} status={vote.status} answer={vote.answer} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {result.analysis && (
+        <details className="trace__analysis">
+          <summary className="why__small">Рассуждение модели</summary>
+          <p className="why__small">{result.analysis}</p>
+        </details>
+      )}
+    </div>
+  );
+}
+
 type DetailsProps = {
   run: EvaluationRun;
   criterion: Criterion;
@@ -172,6 +219,9 @@ function Details({ run, criterion, turns, appeals, onTurn, onAppealChanged }: De
           <Sources result={result} turns={turns} onTurn={onTurn} />
         </div>
         {flags.map((flag) => <p key={flag} className="why__flag why__block" style={block(2)}>{flag}</p>)}
+        <div className="why__block" style={block(2)}>
+          <Trace result={result} criterion={criterion} />
+        </div>
       </div>
       <div className="why__side">
         <div className="why__block" style={block(1)}>

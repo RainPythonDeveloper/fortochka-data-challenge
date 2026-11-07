@@ -12,10 +12,15 @@ from cqa_ai.rubric import NA_ANSWER
 from cqa_ai.scoring import ScoringError, calculate_score
 
 
+def label_value(entry: Any) -> Any:
+    """v1 stores the bare value, v2 stores {"v": value, "turn": n, "why": "..."}."""
+    return entry["v"] if isinstance(entry, dict) else entry
+
+
 def label_results(checklist: ChecklistVersion, label: dict[str, Any]) -> list[CriterionResult]:
     results = []
     for criterion in checklist.criteria:
-        value = label[criterion.id]
+        value = label_value(label[criterion.id])
         if value == NA_ANSWER:
             results.append(
                 CriterionResult(criterion_id=criterion.id, status=ResultStatus.NOT_APPLICABLE)
@@ -93,7 +98,7 @@ def compare(
         by_id = {result.criterion_id: result for result in results}
 
         for criterion in checklist.criteria:
-            expected = label[criterion.id]
+            expected = label_value(label[criterion.id])
             actual = _value(by_id.get(criterion.id))
             stats = report.criteria[criterion.id]
             if actual is None:

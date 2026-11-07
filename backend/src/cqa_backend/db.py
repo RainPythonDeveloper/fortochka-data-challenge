@@ -34,6 +34,13 @@ BEGIN SELECT RAISE(ABORT, 'checklist versions are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS checklist_no_delete BEFORE DELETE ON checklist_versions
 BEGIN SELECT RAISE(ABORT, 'checklist versions cannot be deleted'); END;
 
+-- Checklist versions written by seeding the shipped defaults, not by a user.
+CREATE TABLE IF NOT EXISTS checklist_seeds (
+    checklist_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    PRIMARY KEY (checklist_id, version)
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL,

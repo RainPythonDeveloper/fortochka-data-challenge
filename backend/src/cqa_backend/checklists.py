@@ -21,7 +21,18 @@ logger = logging.getLogger(__name__)
 _ID_PATTERN = re.compile(r"[\w.-]{1,100}")
 
 
+def _mark_seed(conn, checklist_id: str, version: int) -> None:  # noqa: ANN001
+    conn.execute("INSERT OR IGNORE INTO checklist_seeds VALUES (?, ?)", (checklist_id, version))
+
+
 def seed_defaults(db: Database) -> None:
+    """Insert the shipped default checklists and keep them current.
+
+    When a shipped default changes (for example new team notes) and the latest
+    stored version is itself a seed, the update is added as the next version. A
+    version saved by a user is never overridden: once the latest version is not
+    a seed, shipped changes are left for the user to adopt.
+    """
     with db.tx() as conn:
         for checklist in load_default_checklists():
             cursor = conn.execute(
@@ -34,7 +45,39 @@ def seed_defaults(db: Database) -> None:
                 ),
             )
             if cursor.rowcount:
+                _mark_seed(conn, checklist.checklist_id, checklist.version)
                 logger.info("seeded checklist %s v%d", checklist.checklist_id, checklist.version)
+                continue
+            # Databases created before seeds were tracked: the shipped version number
+            # can only have come from seeding.
+            if not conn.execute(
+                "SELECT 1 FROM checklist_seeds WHERE checklist_id = ?", (checklist.checklist_id,)
+            ).fetchone():
+                _mark_seed(conn, checklist.checklist_id, checklist.version)
+            latest = conn.execute(
+                "SELECT version, body_json FROM checklist_versions WHERE checklist_id = ? "
+                "ORDER BY version DESC LIMIT 1",
+                (checklist.checklist_id,),
+            ).fetchone()
+            seeded = conn.execute(
+                "SELECT 1 FROM checklist_seeds WHERE checklist_id = ? AND version = ?",
+                (checklist.checklist_id, latest["version"]),
+            ).fetchone()
+            if not seeded:
+                continue
+            stored = ChecklistVersion.model_validate_json(latest["body_json"])
+            shipped = checklist.model_dump(mode="json", exclude={"version"})
+            if stored.model_dump(mode="json", exclude={"version"}) == shipped:
+                continue
+            upgraded = checklist.model_copy(update={"version": latest["version"] + 1})
+            conn.execute(
+                "INSERT INTO checklist_versions VALUES (?, ?, ?, ?)",
+                (upgraded.checklist_id, upgraded.version, upgraded.model_dump_json(), now_iso()),
+            )
+            _mark_seed(conn, upgraded.checklist_id, upgraded.version)
+            logger.info(
+                "updated default checklist %s to v%d", upgraded.checklist_id, upgraded.version
+            )
 
 
 def list_checklists(db: Database) -> list[ChecklistSummary]:

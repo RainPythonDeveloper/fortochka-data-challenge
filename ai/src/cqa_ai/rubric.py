@@ -88,7 +88,7 @@ def render_criterion(criterion: Criterion, section_title: str) -> str:
     notes = effective_notes(criterion)
     if notes:
         lines.append("Уточнения команды:")
-        lines.extend(f"- {note}" for note in notes)
+        lines.extend(f"{number}. {note}" for number, note in enumerate(notes, start=1))
     return "\n".join(lines)
 
 
@@ -128,6 +128,8 @@ def response_schema(checklist: ChecklistVersion) -> dict[str, Any]:
             "reviewed_to_turn": {"type": "integer"},
             "expected_at_turn": {"type": "integer"},
             "review_flags": {"type": "array", "items": {"type": "string"}},
+            "rule_ref": {"type": "string"},
+            "higher_level_blocker": {"type": "string"},
         },
         "required": [
             "criterion_id",
@@ -139,6 +141,8 @@ def response_schema(checklist: ChecklistVersion) -> dict[str, Any]:
             "reviewed_to_turn",
             "expected_at_turn",
             "review_flags",
+            "rule_ref",
+            "higher_level_blocker",
         ],
         "additionalProperties": False,
     }

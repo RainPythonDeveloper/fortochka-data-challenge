@@ -107,7 +107,25 @@ const FLAG_TEXT: Record<string, string> = {
   ambiguous_rule: 'Спорное правило',
   channel_not_in_checklist: 'Оценочный лист не рассчитан на канал этого диалога',
   partial_result: 'Оценены не все критерии',
+  low_confidence: 'Низкая уверенность: проверьте вручную',
+  arbitrated: 'Судьи разошлись, решил арбитр',
+  judges_disagree: 'Судьи разошлись, арбитр недоступен',
+  evidence_rejected: 'Часть цитат не найдена в реплике и отброшена',
+  code_hint_conflict: 'Код нашёл реплику о личных контактах или оплате, а модель нарушения не увидела: проверьте',
 };
+
+/** "level:15" → "Ступень 15"; the model names which part of the rubric decided. */
+export function ruleText(rule: string | null | undefined): string | null {
+  if (!rule) return null;
+  if (rule === 'yes_when') return 'Условие «Да»';
+  if (rule === 'na_when') return 'Условие N/A';
+  if (rule === 'prompt') return 'Формулировка критерия';
+  const level = /^level:(\d+)$/.exec(rule);
+  if (level) return `Ступень шкалы ${level[1]}`;
+  const note = /^note:(\d+)$/.exec(rule);
+  if (note) return `Уточнение команды № ${note[1]}`;
+  return rule;
+}
 
 /** Snake_case tokens are technical unless the dictionary names them; plain phrases are shown. */
 export function flagText(flag: string): string | null {

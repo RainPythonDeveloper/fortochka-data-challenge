@@ -2584,3 +2584,25 @@ mark.quote {
     transition: none;
   }
 }
+
+/* W7 decision trace */
+.trace {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--color-surface-2, rgba(0, 0, 0, 0.03));
+}
+.trace__votes {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.trace__model {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.trace__analysis summary {
+  cursor: pointer;
+}

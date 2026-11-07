@@ -57,9 +57,10 @@ def test_rewording_drops_inherited_notes_but_keeps_new_ones(checklist):
 
 def test_a_note_written_in_the_ui_comes_last_and_can_override(checklist):
     criterion = checklist.criteria[6].model_copy(deep=True)
+    defaults = len(criterion.team_notes)
     criterion.team_notes = [*criterion.team_notes, "Простое прощание считать достаточным."]
     assert effective_notes(criterion)[-1] == "Простое прощание считать достаточным."
-    assert len(effective_notes(criterion)) == 3
+    assert len(effective_notes(criterion)) == defaults + 1
 
 
 def test_a_switched_off_default_note_does_not_reach_the_prompt(checklist):

@@ -13,6 +13,8 @@ import random
 import time
 
 from cqa_ai.annotate import ConversationFacts, annotate
+from cqa_ai.confidence import assign_confidence
+from cqa_ai.hint_checks import check_hints
 from cqa_ai.contracts import (
     ChecklistVersion,
     ConversationSnapshot,
@@ -62,6 +64,9 @@ async def _call(
             provider=provider.name, model=config.model, role=role, attempt=len(attempts) + 1
         )
         attempts.append(attempt)
+        acquire = getattr(provider, "acquire_slot", None)
+        if acquire is not None:
+            attempt.queue_wait_ms = await acquire()
         started = time.monotonic()
         try:
             response = await provider.complete(
@@ -82,6 +87,11 @@ async def _call(
         attempt.input_tokens = response.input_tokens
         attempt.output_tokens = response.output_tokens
         attempt.cost_usd = provider.cost_per_call
+        cost_of = getattr(provider, "cost_of", None)
+        if cost_of is not None:
+            attempt.cost_usd, attempt.paid_equivalent_usd = cost_of(
+                config.model, response.input_tokens, response.output_tokens
+            )
         return response
     raise AssertionError("unreachable")
 
@@ -160,9 +170,15 @@ async def run_single(
     checklist: ChecklistVersion,
     config: EvaluatorConfig,
     provider: Provider,
+    fallback_provider: Provider | None = None,
+    extra_user: str = "",
 ) -> EvaluationOutput:
     facts = annotate(snapshot)
     prompt = build_prompt(snapshot, checklist, facts)
+    if extra_user:
+        prompt = Prompt(
+            system=prompt.system, user=prompt.user + extra_user, prompt_hash=prompt.prompt_hash
+        )
     attempts: list[ModelAttempt] = []
     run_flags: list[str] = []
 
@@ -172,7 +188,14 @@ async def run_single(
     if not _usable(report) and config.fallback_model:
         fallback = config.model_copy(update={"model": config.fallback_model})
         report = await _ask_model(
-            snapshot, checklist, facts, prompt, fallback, provider, attempts, run_flags
+            snapshot,
+            checklist,
+            facts,
+            prompt,
+            fallback,
+            fallback_provider or provider,
+            attempts,
+            run_flags,
         )
         if _usable(report):
             run_flags.append("served_by_fallback_model")
@@ -194,6 +217,8 @@ async def run_single(
     assert report is not None
     if report.soft_errors:
         run_flags.append("evidence_partly_rejected")
+    check_hints(report.results, checklist, facts)
+    assign_confidence(report.results, run_flags)
     status, reasons = _review(report.results, sorted(set(run_flags)))
     return EvaluationOutput(
         results=report.results,

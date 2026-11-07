@@ -49,32 +49,48 @@ def _load_records(path: str) -> dict[str, dict]:
 def _finished(out_file: Path) -> set[str]:
     if not out_file.exists():
         return set()
-    return {
-        json.loads(line)["conversation_id"]
-        for line in out_file.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    }
+    # Failed dialogues are kept in the file for the report but retried on resume.
+    rows = [json.loads(x) for x in out_file.read_text(encoding="utf-8").splitlines() if x.strip()]
+    return {row["conversation_id"] for row in rows if not row.get("failed")}
 
 
 async def _run(args: argparse.Namespace) -> int:
     records = _load_records(args.data)
-    wanted = _manifest()["splits"][args.split]
+    splits = _manifest()["splits"]
+    wanted = (
+        # "all" is tune + compare: the holdout is opened once, on purpose, by name.
+        splits["tune"] + splits["compare"]
+        if args.split == "all"
+        else splits[args.split]
+    )
     if args.channel:
         wanted = [cid for cid in wanted if records[cid]["channel"] == args.channel]
     if args.limit:
         wanted = wanted[: args.limit]
 
-    out_dir = Path(args.out or f"data/runs/{args.split}-{args.model.replace('/', '_')}")
+    slug = args.model.replace("/", "_").replace(":", "~")
+    out_dir = Path(args.out or f"data/runs/{args.split}-{slug}")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "results.jsonl"
     done = _finished(out_file)
     todo = [cid for cid in wanted if cid not in done]
     print(f"Диалогов: {len(wanted)}, уже готово: {len(done & set(wanted))}, к оценке: {len(todo)}")
 
+    fallback = None if getattr(args, "no_fallback", False) else (
+        args.fallback or os.environ.get("LLM_FALLBACK_MODEL") or None
+    )
     config = EvaluatorConfig(
         provider=args.provider,
         model=args.model,
-        fallback_model=args.fallback or os.environ.get("LLM_FALLBACK_MODEL") or None,
+        # "" keeps service.evaluate from filling the fallback in from the environment.
+        fallback_model=fallback if fallback is not None else "",
+        pipeline=getattr(args, "pipeline", "single"),
+        max_output_tokens=int(os.environ.get("LLM_MAX_OUTPUT_TOKENS", "8000")),
+        second_model=getattr(args, "second_model", None) or "",
+        arbiter_model=getattr(args, "arbiter_model", None) or "",
+        second_criteria=[
+            x.strip() for x in (getattr(args, "second_criteria", None) or "").split(",") if x.strip()
+        ],
     )
     failures = 0
     gate = asyncio.Semaphore(args.concurrency)
@@ -93,17 +109,18 @@ async def _run(args: argparse.Namespace) -> int:
             failed = all(r.status is ResultStatus.FAILED for r in output.results)
             async with lock:
                 failures = failures + 1 if failed else 0
-                if not failed:
-                    row = {
-                        "conversation_id": conversation_id,
-                        "language": record["language"],
-                        "channel": record["channel"],
-                        "model": config.model,
-                        "seconds": round(time.monotonic() - started, 1),
-                        **output.model_dump(mode="json"),
-                    }
-                    with out_file.open("a", encoding="utf-8") as handle:
-                        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                # Failures are written too, so the leaderboard can count them.
+                row = {
+                    "failed": failed,
+                    "conversation_id": conversation_id,
+                    "language": record["language"],
+                    "channel": record["channel"],
+                    "model": config.model,
+                    "seconds": round(time.monotonic() - started, 1),
+                    **output.model_dump(mode="json"),
+                }
+                with out_file.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(row, ensure_ascii=False) + "\n")
                 print(f"{conversation_id}: {'сбой' if failed else 'готово'}", flush=True)
             await asyncio.sleep(args.pause)
 
@@ -117,7 +134,14 @@ async def _run(args: argparse.Namespace) -> int:
 
 def _report(args: argparse.Namespace) -> int:
     path = Path(args.run) / "results.jsonl"
-    runs = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    from cqa_ai.evaluation.bench import latest_rows
+
+    runs = latest_rows(rows)
+    failed = [r["conversation_id"] for r in runs if r.get("failed")]
+    runs = [r for r in runs if not r.get("failed")]
+    if failed:
+        print(f"Не оценены (сбой): {', '.join(failed)}")
     reference = json.loads(Path(args.labels).read_text(encoding="utf-8"))
     checklist = next(
         c for c in load_default_checklists() if c.checklist_id == reference["checklist_id"]
@@ -147,10 +171,43 @@ def main() -> int:
     run.add_argument("--out")
     report = commands.add_parser("report")
     report.add_argument("--run", required=True)
-    report.add_argument("--labels", default="labels/reference_v1.json")
+    report.add_argument("--labels", default="labels/reference_v3.json")
+    bench_cmd = commands.add_parser("bench")
+    bench_cmd.add_argument("--data", required=True)
+    bench_cmd.add_argument("--split", choices=["tune", "compare", "holdout", "all"], default="tune")
+    bench_cmd.add_argument("--channel", default="agent chat", help="пустая строка: все каналы")
+    bench_cmd.add_argument("--models", required=True, help="provider:model через запятую")
+    bench_cmd.add_argument("--pipelines", default="single")
+    bench_cmd.add_argument("--repeats", type=int, default=1)
+    bench_cmd.add_argument("--limit", type=int)
+    bench_cmd.add_argument("--concurrency", type=int, default=3)
+    bench_cmd.add_argument("--pause", type=float, default=1.0)
+    bench_cmd.add_argument("--out", required=True)
+    bench_cmd.add_argument("--labels", default="labels/reference_v3.json")
+    bench_cmd.add_argument("--second-model", dest="second_model", help="для two_judges")
+    bench_cmd.add_argument("--fallback", help="запасная модель; по умолчанию без неё")
+    bench_cmd.add_argument("--arbiter-model", dest="arbiter_model", help="для two_judges")
+    bench_cmd.add_argument("--second-criteria", dest="second_criteria", help="для second_opinion: c07,c08")
+    board = commands.add_parser("leaderboard", help="пересобрать таблицу по готовым прогонам")
+    board.add_argument("--out", required=True)
+    board.add_argument("--labels", default="labels/reference_v3.json")
     args = parser.parse_args()
     if args.command == "report":
         return _report(args)
+    if args.command == "leaderboard":
+        from cqa_ai.evaluation.bench import write_leaderboard
+
+        write_leaderboard(Path(args.out), Path(args.labels))
+        print(Path(args.out) / "leaderboard.md")
+        return 0
+    if args.command == "bench":
+        from cqa_ai.evaluation.bench import bench
+
+        try:
+            return asyncio.run(bench(args, _run))
+        except EvaluatorNotConfigured as error:
+            print(error, file=sys.stderr)
+            return 2
     try:
         return asyncio.run(_run(args))
     except EvaluatorNotConfigured as error:

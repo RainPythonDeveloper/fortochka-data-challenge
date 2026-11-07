@@ -52,6 +52,19 @@ export type CriterionResult = {
   reviewed_range: TurnRange | null;
   expected_at_turn: number | null;
   review_flags: string[];
+  /** W7 decision trace. Optional: older runs do not have it. */
+  analysis?: string | null;
+  rule_ref?: string | null;
+  alternative?: string | null;
+  confidence?: number | null;
+  votes?: JudgeVote[] | null;
+};
+
+export type JudgeVote = {
+  model: string;
+  status: ResultStatus;
+  answer: Answer;
+  justification: string;
 };
 
 export type CriterionScore = {

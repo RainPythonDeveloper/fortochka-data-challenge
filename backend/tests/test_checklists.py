@@ -128,3 +128,56 @@ def test_created_checklist_can_be_used_for_evaluation(client):
     job = run_job(client, ["syn-001"], checklist_id="my-list")
     assert job["status"] == "done"
     assert client.get("/evaluations").json()[0]["checklist_id"] == "my-list"
+
+
+
+def _versions(db, checklist_id):
+    with db.read() as conn:
+        rows = conn.execute(
+            "SELECT version FROM checklist_versions WHERE checklist_id = ? ORDER BY version",
+            (checklist_id,),
+        ).fetchall()
+    return [r["version"] for r in rows]
+
+
+def _shipped(monkeypatch, note):
+    from cqa_ai import load_default_checklists
+
+    import cqa_backend.checklists as module
+
+    defaults = load_default_checklists()
+    changed = [c.model_copy(deep=True) for c in defaults]
+    changed[0].criteria[0].team_notes = [note]
+    monkeypatch.setattr(module, "load_default_checklists", lambda: changed)
+    return changed[0]
+
+
+def test_shipped_changes_are_added_each_time_while_the_latest_is_a_seed(tmp_path, monkeypatch):
+    from cqa_backend.checklists import seed_defaults
+    from cqa_backend.db import Database
+
+    db = Database(tmp_path / "seed.sqlite")
+    first = _shipped(monkeypatch, "уточнение 1")
+    seed_defaults(db)
+    _shipped(monkeypatch, "уточнение 2")
+    seed_defaults(db)
+    seed_defaults(db)  # idempotent
+    _shipped(monkeypatch, "уточнение 3")
+    seed_defaults(db)
+    assert _versions(db, first.checklist_id) == [1, 2, 3]
+
+
+def test_a_user_version_is_never_overridden_by_a_shipped_change(tmp_path, monkeypatch):
+    from cqa_backend.checklists import create_version, get_checklist, seed_defaults
+    from cqa_backend.db import Database
+
+    db = Database(tmp_path / "seed.sqlite")
+    first = _shipped(monkeypatch, "уточнение 1")
+    seed_defaults(db)
+    body = first.model_dump(mode="json")
+    body["criteria"][0]["title"] = "Изменено пользователем"
+    create_version(db, first.checklist_id, body)
+    _shipped(monkeypatch, "уточнение 2")
+    seed_defaults(db)
+    assert _versions(db, first.checklist_id) == [1, 2]
+    assert get_checklist(db, first.checklist_id).criteria[0].title == "Изменено пользователем"

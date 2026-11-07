@@ -43,6 +43,11 @@ def _item(row: Any) -> dict[str, Any]:
     }
     if row["status"] == "done":
         score = json.loads(row["score_json"])
+        trace = {
+            result["criterion_id"]: result
+            for result in json.loads(row["results_json"] or "[]")
+            if isinstance(result, dict)
+        }
         item.update(
             total=score["total"],
             partial_total=score["partial_total"],
@@ -55,6 +60,9 @@ def _item(row: Any) -> dict[str, Any]:
                     "answer": entry["answer"],
                     "weight": entry["weight"],
                     "points": entry["points"],
+                    # W7 trace: how sure the evaluator was and which rule decided.
+                    "confidence": trace.get(entry["criterion_id"], {}).get("confidence"),
+                    "rule_ref": trace.get(entry["criterion_id"], {}).get("rule_ref"),
                 }
                 for entry in score["criteria"]
             ],
@@ -70,7 +78,7 @@ def collect(db: Database, group_id: str | None, checklist_id: str | None) -> dic
         params.append(checklist_id)
     query = f"""
         SELECT c.id, c.group_id, c.channel, c.language, r.id AS run_id, r.status, r.error,
-               r.checklist_id, r.checklist_version, r.score_json, r.review_status,
+               r.checklist_id, r.checklist_version, r.score_json, r.results_json, r.review_status,
                r.review_reasons_json
         FROM conversations c
         LEFT JOIN evaluation_runs r ON r.rowid = ({latest})
@@ -111,7 +119,13 @@ def to_csv(export: dict[str, Any]) -> str:
     )
     columns = list(_FIXED_COLUMNS)
     for criterion_id in criterion_ids:
-        columns += [f"{criterion_id}_status", f"{criterion_id}_answer", f"{criterion_id}_points"]
+        columns += [
+            f"{criterion_id}_status",
+            f"{criterion_id}_answer",
+            f"{criterion_id}_points",
+            f"{criterion_id}_confidence",
+            f"{criterion_id}_rule",
+        ]
 
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=columns)
@@ -124,5 +138,7 @@ def to_csv(export: dict[str, Any]) -> str:
             row[f"{prefix}_status"] = entry["status"]
             row[f"{prefix}_answer"] = entry["answer"]
             row[f"{prefix}_points"] = entry["points"]
+            row[f"{prefix}_confidence"] = entry.get("confidence")
+            row[f"{prefix}_rule"] = entry.get("rule_ref")
         writer.writerow({key: _cell(value) for key, value in row.items()})
     return buffer.getvalue()

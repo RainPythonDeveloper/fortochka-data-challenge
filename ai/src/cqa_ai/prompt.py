@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from functools import cache
 from importlib import resources
 
-from cqa_ai.annotate import ConversationFacts, render_facts, render_turn
+from cqa_ai.annotate import ConversationFacts, render_facts, render_hints, render_turn
 from cqa_ai.contracts import ChecklistVersion, ConversationSnapshot
 from cqa_ai.rubric import render_rubric
 
@@ -39,7 +39,7 @@ Deciding:
 - Use "unassessable" only when a required source, such as audio, is missing. Never use it for ordinary doubt.
 
 Output: return only one JSON object, with no text around it, in this shape:
-{"results": [{"criterion_id": "...", "analysis": "...", "answer": "...", "justification": "...", "evidence": [{"turn_index": 0, "quote": "..."}], "reviewed_from_turn": -1, "reviewed_to_turn": -1, "expected_at_turn": -1, "review_flags": []}]}
+{"results": [{"criterion_id": "...", "analysis": "...", "answer": "...", "justification": "...", "evidence": [{"turn_index": 0, "quote": "..."}], "reviewed_from_turn": -1, "reviewed_to_turn": -1, "expected_at_turn": -1, "review_flags": [], "rule_ref": "...", "higher_level_blocker": ""}]}
 
 Fields:
 - analysis: one to three short sentences of reasoning, written before you commit to the answer.
@@ -49,6 +49,8 @@ Fields:
 - reviewed_from_turn, reviewed_to_turn: the range you checked when the answer rests on something that did not happen: a missing action, or a violation flag answered "no". Otherwise use -1.
 - expected_at_turn: the turn where a missing action was expected, otherwise -1.
 - review_flags: short snake_case reasons, or an empty list.
+- rule_ref: which part of the rubric decided the answer: "yes_when", "na_when", "level:<value>" for a scale level, "note:<n>" for the n-th team note (1-based), or "prompt".
+- higher_level_blocker: for a scale answer below the top level, one short Russian phrase naming what kept it from the next level up. Otherwise "".
 """
 
 _VOICE_RULES = """\
@@ -67,6 +69,12 @@ These are recurring answers from past support dialogues, not an official knowled
 """
 
 
+_HINTS_INTRO = (
+    "Подсказки кода по словарю. Они указывают, куда смотреть, и могут ошибаться: "
+    "решение принимай только по тексту реплик."
+)
+
+
 @dataclass(frozen=True)
 class Prompt:
     system: str
@@ -83,7 +91,7 @@ def _reference_notes() -> str:
 @cache
 def prompt_version() -> str:
     """Changes whenever the fixed prompt text changes, which keeps caches honest."""
-    text = _ROLE + _VOICE_RULES + _NOTES_INTRO + _reference_notes()
+    text = _ROLE + _VOICE_RULES + _NOTES_INTRO + _HINTS_INTRO + "facts-v3" + _reference_notes()
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
@@ -104,6 +112,7 @@ def build_prompt(
     user = (
         f"Канал: {snapshot.channel}. Язык: {snapshot.language}.\n\n"
         f"Служебные факты, вычисленные кодом:\n{render_facts(facts)}\n\n"
+        f"{_HINTS_INTRO}\n{render_hints(facts)}\n\n"
         f"<transcript>\n{transcript}\n</transcript>\n\n"
         "Оцени работу оператора по всем критериям рубрики."
     )

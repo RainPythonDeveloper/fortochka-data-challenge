@@ -132,6 +132,15 @@ class TurnRange(BaseModel):
     to_turn: int
 
 
+class JudgeVote(BaseModel):
+    """One judge's (or one repeat's) answer for a criterion, kept for the trace."""
+
+    model: str
+    status: ResultStatus
+    answer: Answer = None
+    justification: str = ""
+
+
 class CriterionResult(BaseModel):
     """One decision. `answer` is null unless `status` is `assessed`."""
 
@@ -143,6 +152,12 @@ class CriterionResult(BaseModel):
     reviewed_range: TurnRange | None = None
     expected_at_turn: int | None = None
     review_flags: list[str] = Field(default_factory=list)
+    # W7 decision trace. All optional, so older results and clients stay valid.
+    analysis: str | None = None  # the model's short reasoning before the answer
+    rule_ref: str | None = None  # "yes_when" | "na_when" | "level:15" | "note:2" | "prompt"
+    alternative: str | None = None  # scales: what kept the answer from the next level up
+    confidence: float | None = None  # 0..1, computed in code, never by the model
+    votes: list[JudgeVote] | None = None  # each judge or repeat, when there were several
 
 
 class CriterionScore(BaseModel):
@@ -191,6 +206,10 @@ class ModelAttempt(BaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
+    # What the same call would cost on a paid provider (see providers/profiles.py).
+    paid_equivalent_usd: float | None = None
+    # Time spent waiting for the provider's rate-limit slot before the call.
+    queue_wait_ms: int | None = None
     valid: bool = False
     errors: list[str] = Field(default_factory=list)
 
@@ -214,6 +233,12 @@ class EvaluatorConfig(BaseModel):
     pipeline: str = "single"
     temperature: float | None = 0
     max_output_tokens: int = 8000
+    # Ensembles (W5). `provider:model` strings; empty means "not used".
+    second_model: str | None = None
+    arbiter_model: str | None = None
+    votes: int = 3
+    # second_opinion: criteria the second model re-checks. Empty: violation flags only.
+    second_criteria: list[str] = Field(default_factory=list)
     prompt_version: str = Field(default_factory=_current_prompt_version)
 
 

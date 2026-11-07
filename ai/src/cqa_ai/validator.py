@@ -95,12 +95,16 @@ def _check_evidence(
         turn = turns.get(index) if isinstance(index, int) else None
         if turn is None:
             report.soft_errors.append(f"{criterion_id}: turn {index} does not exist")
+            if "evidence_rejected" not in flags:
+                flags.append("evidence_rejected")
             continue
         quote = _match_quote(str(item.get("quote", "")), turn.text)
         if quote is None:
             report.soft_errors.append(
                 f"{criterion_id}: the quote is not an exact substring of turn {index}"
             )
+            if "evidence_rejected" not in flags:
+                flags.append("evidence_rejected")
             continue
         if facts.is_internal(index) and "evidence_internal_turn" not in flags:
             flags.append("evidence_internal_turn")
@@ -200,6 +204,9 @@ def validate_response(
                 reviewed_range=reviewed,
                 expected_at_turn=expected,
                 review_flags=flags,
+                analysis=str(item.get("analysis") or "").strip() or None,
+                rule_ref=str(item.get("rule_ref") or "").strip() or None,
+                alternative=str(item.get("higher_level_blocker") or "").strip() or None,
             )
         )
     return report

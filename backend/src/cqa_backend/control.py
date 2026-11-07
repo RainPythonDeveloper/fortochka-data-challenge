@@ -225,7 +225,13 @@ async def run_control(
         await service.wait()
         report.rounds = attempt + 1
         report.incomplete = find_incomplete(db, imported.conversation_ids)
-        pending = list(report.incomplete)
+        # A call blocked by the personal-data policy fails the same way every time:
+        # retrying it only spends time in the last hour.
+        pending = [
+            item
+            for item, reason in report.incomplete.items()
+            if "не отправлен в модель" not in reason
+        ]
         if not pending:
             break
 
