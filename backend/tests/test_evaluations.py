@@ -417,3 +417,69 @@ def test_fallback_model_is_part_of_the_cache_key():
         return evaluator_key(resolve_evaluator_config(settings))
 
     assert key("a") != key("b")
+
+
+def test_a_run_logs_its_stages_in_order(make_client):
+    client = make_client(evaluator=CountingEvaluator())
+    put(client, "syn-001")
+    run_id = run_job(client, ["syn-001"])["evaluation_ids"][0]
+    stages = client.get(f"/evaluations/{run_id}").json()["log"]["stages"]
+    assert [item["id"] for item in stages] == ["parse", "model", "validate", "score"]
+    assert all(item["ms"] >= 0 for item in stages)
+
+
+def test_a_cache_hit_logs_no_model_stage(make_client):
+    client = make_client(evaluator=CountingEvaluator())
+    put(client, "syn-001")
+    run_job(client, ["syn-001"])
+    run_id = run_job(client, ["syn-001"])["evaluation_ids"][0]
+    stages = client.get(f"/evaluations/{run_id}").json()["log"]["stages"]
+    assert [item["id"] for item in stages] == ["parse", "score"]
+
+
+def test_a_failed_run_still_logs_the_stages_it_reached(make_client):
+    client = make_client(evaluator=CountingEvaluator(fail_for={"syn-001"}))
+    put(client, "syn-001")
+    run_id = run_job(client, ["syn-001"])["evaluation_ids"][0]
+    run = client.get(f"/evaluations/{run_id}").json()
+    assert run["status"] == "failed" and run["log"]["stages"][0]["id"] == "parse"
+
+
+def test_a_job_reports_the_stage_of_a_running_dialogue(make_client):
+    release = None
+
+    async def slow(snapshot, checklist, config):
+        await release.wait()
+        return await CountingEvaluator()(snapshot, checklist, config)
+
+    client = make_client(evaluator=slow)
+    put(client, "syn-001")
+    release = asyncio.Event()
+    job = client.post(
+        "/evaluations", json={"conversation_ids": ["syn-001"], "checklist_id": CHECKLIST_ID}
+    ).json()
+    deadline = time.monotonic() + 5
+    current = []
+    while time.monotonic() < deadline and not any(i["stage"] == "model" for i in current):
+        current = client.get(f"/jobs/{job['id']}").json()["current"]
+    assert [(item["conversation_id"], item["stage"]) for item in current] == [("syn-001", "model")]
+    client.portal.call(release.set)
+    assert wait_for_job(client, job["id"])["current"] == []
+
+
+def test_the_summary_shows_the_state_of_the_latest_run(make_client):
+    client = make_client(evaluator=CountingEvaluator(fail_for={"syn-002"}))
+    put(client, "syn-001", "syn-002", "syn-003")
+    run_id = run_job(client, ["syn-001"])["evaluation_ids"][0]
+    run_job(client, ["syn-002"])
+    client.post(
+        "/appeals", json={"evaluation_id": run_id, "criterion_id": "c01", "comment": "Не согласен"}
+    )
+    rows = {item["id"]: item for item in client.get("/conversations").json()}
+    done, failed, fresh = rows["syn-001"], rows["syn-002"], rows["syn-003"]
+    assert done["latest_status"] == "done" and done["open_appeals"] == 1
+    assert done["review_status"] == "flagged" and done["latest_evaluated_at"]
+    assert failed["latest_status"] == "failed" and failed["latest_error"]
+    assert "evaluation_failed" in failed["latest_reasons"]
+    assert fresh["latest_status"] is None and fresh["open_appeals"] == 0
+    assert fresh["review_status"] is None and fresh["latest_evaluated_at"] is None

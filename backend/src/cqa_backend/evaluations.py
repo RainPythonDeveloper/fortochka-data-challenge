@@ -24,6 +24,7 @@ from cqa_ai.contracts import (
     CriterionResult,
     EvaluationOutput,
     EvaluatorConfig,
+    ModelAttempt,
     ResultStatus,
     ReviewStatus,
     ScoreSummary,
@@ -40,7 +41,9 @@ from cqa_backend.schemas import (
     EvaluationRun,
     EvaluationSummary,
     Job,
+    JobStage,
     RunLog,
+    StageId,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,6 +53,20 @@ Evaluator = Callable[
 ]
 MAX_ERROR_LENGTH = 500
 AUTO_CHECKLIST = "auto"
+
+StageMark = Callable[[StageId], None]
+
+
+def elapsed_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 2)
+
+
+def evaluator_stages(attempts: list[ModelAttempt], elapsed: float) -> list[dict[str, Any]]:
+    """Split the evaluator's time. It reports only its model calls, so whatever is left
+    is its own checking of the answer and the quotes."""
+    timed = [item.latency_ms for item in attempts if item.latency_ms is not None]
+    model = min(float(sum(timed)), elapsed) if timed else elapsed
+    return [{"id": "model", "ms": model}, {"id": "validate", "ms": round(elapsed - model, 2)}]
 
 
 def evaluator_key(config: EvaluatorConfig) -> str:
@@ -89,6 +106,8 @@ class EvaluationService:
         self.pace_lock = asyncio.Lock()
         self.next_start = 0.0
         self.tasks: set[asyncio.Task[None]] = set()
+        # In memory on purpose: it only says what is happening right now.
+        self.current: dict[str, dict[str, JobStage]] = {}
 
     # Job lifecycle
 
@@ -172,6 +191,7 @@ class EvaluationService:
             failed=sum(row["status"] == "failed" for row in items),
             evaluation_ids=[row["evaluation_id"] for row in items if row["evaluation_id"]],
             errors=errors,
+            current=list(self.current.get(job_id, {}).values()),
         )
 
     def _spawn(self, job_id: str) -> None:
@@ -261,6 +281,17 @@ class EvaluationService:
 
     # One dialogue
 
+    def _mark_stage(self, job_id: str, conversation_id: str, stage: StageId) -> None:
+        self.current.setdefault(job_id, {})[conversation_id] = JobStage(
+            conversation_id=conversation_id, stage=stage, started_at=now_iso()
+        )
+
+    def _clear_stage(self, job_id: str, conversation_id: str) -> None:
+        running = self.current.get(job_id, {})
+        running.pop(conversation_id, None)
+        if not running:
+            self.current.pop(job_id, None)
+
     async def _process(
         self,
         job_id: str,
@@ -269,16 +300,22 @@ class EvaluationService:
         checklist: ChecklistVersion | None,
         force: bool,
     ) -> None:
+        def mark(stage: StageId) -> None:
+            self._mark_stage(job_id, conversation_id, stage)
+
         async with self.semaphore:
+            mark("parse")
+            started = time.perf_counter()
             snapshot = await asyncio.to_thread(self._load_snapshot, conversation_id)
             hashes = {
                 "content_hash": content_hash(snapshot),
                 "checklist_hash": checklist_hash(checklist) if checklist else "",
             }
+            parse = {"id": "parse", "ms": elapsed_ms(started)}
             try:
                 if checklist is None:
                     raise LookupError(f"Нет чек-листа для канала {redact(snapshot.channel)[:64]!r}")
-                draft = await self._evaluate(snapshot, checklist, force, hashes)
+                draft = await self._evaluate(snapshot, checklist, force, hashes, mark)
             except Exception as exc:  # noqa: BLE001 - one dialogue must not stop the batch
                 logger.warning("evaluation of %s failed: %s", conversation_id, type(exc).__name__)
                 draft = Draft(
@@ -288,9 +325,13 @@ class EvaluationService:
                     review_reasons=["evaluation_failed"],
                     log=getattr(exc, "run_log", {}),
                 )
-            await asyncio.to_thread(
-                self._save, job_id, position, snapshot, checklist, hashes, draft
-            )
+            draft.log["stages"] = [parse, *draft.log.get("stages", [])]
+            try:
+                await asyncio.to_thread(
+                    self._save, job_id, position, snapshot, checklist, hashes, draft
+                )
+            finally:
+                self._clear_stage(job_id, conversation_id)
 
     def _load_snapshot(self, conversation_id: str) -> ConversationSnapshot:
         with self.db.read() as conn:
@@ -306,6 +347,7 @@ class EvaluationService:
         checklist: ChecklistVersion,
         force: bool,
         hashes: dict[str, str],
+        mark: StageMark,
     ) -> Draft:
         config = resolve_evaluator_config(self.settings)
         key = evaluator_key(config)
@@ -313,22 +355,27 @@ class EvaluationService:
         if not force:
             source = await asyncio.to_thread(self._find_cached, hashes, key)
             if source is not None:
+                mark("score")
                 return self._from_cache(source, snapshot, checklist, key, evaluator_log)
 
+        mark("model")
         await self._wait_for_turn()
         started = time.perf_counter()
         output = await asyncio.wait_for(
             self.evaluator(snapshot, checklist, config),
             timeout=self.settings.cqa_eval_timeout_s,
         )
+        evaluator_ms = elapsed_ms(started)
+        mark("validate")
         costs = [item.cost_usd for item in output.attempts if item.cost_usd is not None]
         log = {
             "prompt_hash": output.prompt_hash,
             "pipeline": output.pipeline,
             "attempts": [item.model_dump(mode="json") for item in output.attempts],
-            "latency_ms": round((time.perf_counter() - started) * 1000),
+            "latency_ms": round(evaluator_ms),
             "cost_usd": sum(costs) if costs else None,
             "evaluator": evaluator_log,
+            "stages": evaluator_stages(output.attempts, evaluator_ms),
         }
         # `evaluate` reports a model failure or a refusal to send a call as a result with
         # every criterion failed. Nothing was assessed, so there is no score to keep.
@@ -342,11 +389,14 @@ class EvaluationService:
                 log=log,
                 key=key,
             )
+        mark("score")
+        started = time.perf_counter()
         try:
             score = calculate_score(checklist, output.results)
         except Exception as exc:
             exc.run_log = log  # type: ignore[attr-defined]
             raise
+        log["stages"].append({"id": "score", "ms": elapsed_ms(started)})
         return self._draft(
             snapshot, checklist, output.results, score, output.review_status.value,
             output.review_reasons, log, key,
@@ -388,6 +438,8 @@ class EvaluationService:
         version, which is what makes a weight-only change free of model calls."""
         results = [CriterionResult.model_validate(item) for item in json.loads(source["results_json"])]
         source_log = json.loads(source["log_json"])
+        started = time.perf_counter()
+        score = calculate_score(checklist, results)
         log = {
             "prompt_hash": source_log.get("prompt_hash", ""),
             "pipeline": source_log.get("pipeline", ""),
@@ -396,9 +448,10 @@ class EvaluationService:
             "cost_usd": 0.0,
             "cached_from": source_log.get("cached_from") or source["id"],
             "evaluator": evaluator_log,
+            "stages": [{"id": "score", "ms": elapsed_ms(started)}],
         }
         return self._draft(
-            snapshot, checklist, results, calculate_score(checklist, results),
+            snapshot, checklist, results, score,
             source["review_status"], json.loads(source["review_reasons_json"]), log, key,
         )
 

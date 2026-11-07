@@ -210,7 +210,11 @@ def ingest_record(db: Database, record: Any) -> tuple[str, list[str]]:
 
 
 _SUMMARY_SQL = """
-SELECT c.*, r.id AS run_id, r.final_score_json
+SELECT c.*, r.id AS run_id, r.final_score_json, r.status AS run_status, r.error AS run_error,
+    r.review_reasons_json AS run_reasons, r.review_status AS run_review_status,
+    r.created_at AS run_created_at,
+    (SELECT COUNT(*) FROM appeals a JOIN evaluation_runs e ON e.id = a.evaluation_id
+     WHERE e.conversation_id = c.id AND a.status = 'open') AS open_appeals
 FROM conversations c
 LEFT JOIN evaluation_runs r ON r.rowid = (
     SELECT MAX(rowid) FROM evaluation_runs WHERE conversation_id = c.id
@@ -231,6 +235,12 @@ def _summary(row: sqlite3.Row) -> dict[str, Any]:
         "latest_evaluation_id": row["run_id"],
         "latest_total": score.get("total"),
         "gross_error": bool(score.get("gross_error")),
+        "latest_status": row["run_status"],
+        "latest_error": row["run_error"],
+        "latest_reasons": json.loads(row["run_reasons"]) if row["run_reasons"] else [],
+        "latest_evaluated_at": row["run_created_at"],
+        "review_status": row["run_review_status"],
+        "open_appeals": row["open_appeals"],
     }
 
 
