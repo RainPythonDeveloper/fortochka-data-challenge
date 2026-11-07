@@ -170,6 +170,17 @@ def validate_response(
             else None
         )
         expected = _turn_or_none(item.get("expected_at_turn"), snapshot)
+        if (
+            criterion.flag
+            and status is ResultStatus.ASSESSED
+            and value == "no"
+            and not evidence
+            and reviewed is None
+            and snapshot.turns
+        ):
+            # "No violation" has nothing to quote and rests on reading the whole
+            # dialogue, which is exactly what the model was given.
+            reviewed = TurnRange(from_turn=0, to_turn=len(snapshot.turns) - 1)
 
         if not justification:
             report.soft_errors.append(f"{criterion.id}: the justification is empty")

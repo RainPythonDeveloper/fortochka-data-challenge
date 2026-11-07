@@ -76,6 +76,40 @@ def test_a_made_up_quote_is_dropped_but_the_decision_stands(chat, checklist):
     assert "evidence_missing" in result.review_flags
 
 
+def flag_criterion(checklist):
+    return next(criterion for criterion in checklist.criteria if criterion.flag)
+
+
+def test_a_flag_answered_no_needs_no_quote(chat, checklist):
+    # "No violation" has nothing to quote: the model read the whole dialogue.
+    flag = flag_criterion(checklist)
+    reply = model_reply(checklist, {flag.id: {"answer": "no", "evidence": []}})
+    report = check(reply, chat, checklist)
+    assert not report.problems
+    result = by_id(report)[flag.id]
+    assert result.evidence == [] and "evidence_missing" not in result.review_flags
+    assert result.reviewed_range.from_turn == 0
+    assert result.reviewed_range.to_turn == len(chat.turns) - 1
+
+
+def test_a_flag_answered_no_keeps_the_range_the_model_gave(chat, checklist):
+    flag = flag_criterion(checklist)
+    reply = model_reply(
+        checklist,
+        {flag.id: {"answer": "no", "evidence": [], "reviewed_from_turn": 4, "reviewed_to_turn": 6}},
+    )
+    result = by_id(check(reply, chat, checklist))[flag.id]
+    assert (result.reviewed_range.from_turn, result.reviewed_range.to_turn) == (4, 6)
+
+
+def test_a_flag_answered_yes_still_needs_evidence(chat, checklist):
+    flag = flag_criterion(checklist)
+    reply = model_reply(checklist, {flag.id: {"answer": "yes", "evidence": []}})
+    report = check(reply, chat, checklist)
+    assert any(flag.id in problem for problem in report.soft_errors)
+    assert "evidence_missing" in by_id(report)[flag.id].review_flags
+
+
 def test_a_turn_that_does_not_exist_is_rejected(chat, checklist):
     reply = model_reply(checklist, {"c01": {"evidence": [{"turn_index": 99, "quote": "x"}]}})
     assert any("99" in error for error in check(reply, chat, checklist).soft_errors)

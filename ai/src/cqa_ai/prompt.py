@@ -25,7 +25,7 @@ INPUT: immutable transcript, current rubric, service facts computed by code, ref
 3. For each criterion determine applicability first, then its value.
 4. Attribute actions to the required actor and audience. Only the operator is evaluated. The bot is context: a bot greeting or a bot answer is not the operator's action.
 5. Cite turns by their number in square brackets. Keep evidence in the original language, copied exactly.
-6. For a missing action, return where it was expected and the range you reviewed. Do not invent a quote for something that did not happen.
+6. For a missing action, return where it was expected and the range you reviewed. For a violation flag answered "no", return the range you reviewed. Do not invent a quote for something that did not happen.
 7. Resolve ordinary ambiguity using the rubric and still give an answer. Add a short review flag when the decision is genuinely debatable.
 8. Do not invent missing audio, product facts or identities.
 9. Return exactly one result per criterion, in rubric order.
@@ -46,7 +46,8 @@ Fields:
 - answer: a string. "yes", "no", "na", "unassessable", or a scale level such as "15".
 - justification: a short explanation in Russian for the person reviewing the result. For "na", name the condition that is met.
 - evidence: the turns that support the decision. A quote must be an exact substring of that turn, so keep it short. System events count as evidence.
-- reviewed_from_turn, reviewed_to_turn, expected_at_turn: fill them for a missing action, otherwise use -1.
+- reviewed_from_turn, reviewed_to_turn: the range you checked when the answer rests on something that did not happen: a missing action, or a violation flag answered "no". Otherwise use -1.
+- expected_at_turn: the turn where a missing action was expected, otherwise -1.
 - review_flags: short snake_case reasons, or an empty list.
 """
 
