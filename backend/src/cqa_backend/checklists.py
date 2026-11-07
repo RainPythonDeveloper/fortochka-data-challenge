@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import uuid
 from typing import Any
 
 from cqa_ai import load_default_checklists
@@ -14,6 +16,9 @@ from cqa_backend.errors import ApiError, describe_validation
 from cqa_backend.schemas import ChecklistSummary
 
 logger = logging.getLogger(__name__)
+
+# The id is a single URL path segment in every checklist route.
+_ID_PATTERN = re.compile(r"[\w.-]{1,100}")
 
 
 def seed_defaults(db: Database) -> None:
@@ -73,6 +78,45 @@ def get_checklist(db: Database, checklist_id: str, version: int | None = None) -
     return ChecklistVersion.model_validate_json(row["body_json"])
 
 
+def latest_by_channel(db: Database) -> dict[str, ChecklistVersion]:
+    """Channel to checklist, from the latest versions only. If several checklists
+    claim a channel, the first `checklist_id` in sort order wins, so a choice is stable."""
+    choice: dict[str, ChecklistVersion] = {}
+    for summary in list_checklists(db):
+        for channel in summary.channels:
+            if channel not in choice:
+                choice[channel] = get_checklist(db, summary.checklist_id)
+    return choice
+
+
+def _validated(body: dict[str, Any], checklist_id: str, version: int) -> ChecklistVersion:
+    """`version` in the body is ignored, even when it is absent or invalid."""
+    try:
+        return ChecklistVersion.model_validate(
+            {**body, "checklist_id": checklist_id, "version": version}
+        )
+    except ValidationError as exc:
+        raise ApiError(422, describe_validation(exc)) from None
+
+
+def create_checklist(db: Database, body: dict[str, Any]) -> ChecklistVersion:
+    checklist_id = body.get("checklist_id") or f"checklist-{uuid.uuid4().hex[:12]}"
+    if not isinstance(checklist_id, str) or not _ID_PATTERN.fullmatch(checklist_id):
+        raise ApiError(422, "checklist_id: допустимы буквы, цифры, точка, дефис и подчёркивание")
+    checklist = _validated(body, checklist_id, 1)
+    with db.tx() as conn:
+        taken = conn.execute(
+            "SELECT 1 FROM checklist_versions WHERE checklist_id = ? LIMIT 1", (checklist_id,)
+        ).fetchone()
+        if taken:
+            raise ApiError(409, "Чек-лист с таким checklist_id уже есть")
+        conn.execute(
+            "INSERT INTO checklist_versions VALUES (?, 1, ?, ?)",
+            (checklist_id, checklist.model_dump_json(), now_iso()),
+        )
+    return checklist
+
+
 def create_version(db: Database, checklist_id: str, body: dict[str, Any]) -> ChecklistVersion:
     if body.get("checklist_id", checklist_id) != checklist_id:
         raise ApiError(422, "checklist_id в теле не совпадает с адресом")
@@ -83,13 +127,7 @@ def create_version(db: Database, checklist_id: str, body: dict[str, Any]) -> Che
         ).fetchone()["version"]
         if latest is None:
             raise ApiError(404, "Чек-лист не найден")
-        try:
-            # `version` in the body is ignored, even when it is absent or invalid.
-            checklist = ChecklistVersion.model_validate(
-                {**body, "checklist_id": checklist_id, "version": latest + 1}
-            )
-        except ValidationError as exc:
-            raise ApiError(422, describe_validation(exc)) from None
+        checklist = _validated(body, checklist_id, latest + 1)
         conn.execute(
             "INSERT INTO checklist_versions VALUES (?, ?, ?, ?)",
             (checklist_id, checklist.version, checklist.model_dump_json(), now_iso()),

@@ -1,7 +1,7 @@
 import sqlite3
 
 import pytest
-from conftest import CHECKLIST_ID, new_version
+from conftest import CHECKLIST_ID, make_record, new_version, run_job
 
 
 def test_defaults_are_loaded_once(make_client):
@@ -70,3 +70,60 @@ def test_versions_cannot_be_deleted_or_changed(client):
             conn.execute("DELETE FROM checklist_versions")
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("UPDATE checklist_versions SET body_json = '{}'")
+
+
+def rubric(client, **extra):
+    body = client.get(f"/checklists/{CHECKLIST_ID}").json()
+    del body["checklist_id"], body["version"]
+    return {**body, **extra}
+
+
+def test_user_creates_a_checklist_with_version_one(client):
+    response = client.post(
+        "/checklists", json=rubric(client, checklist_id="my-list", version=7, title="Мой")
+    )
+    assert response.status_code == 200, response.text
+    created = response.json()
+    assert created["checklist_id"] == "my-list" and created["version"] == 1
+    assert client.get("/checklists/my-list").json()["title"] == "Мой"
+    assert len(client.get("/checklists").json()) == 2
+
+    body = client.get("/checklists/my-list").json()
+    assert client.post("/checklists/my-list/versions", json=body).json()["version"] == 2
+
+
+def test_checklist_id_is_generated_when_absent(client):
+    first = client.post("/checklists", json=rubric(client)).json()
+    second = client.post("/checklists", json=rubric(client, checklist_id="")).json()
+    assert first["checklist_id"] != second["checklist_id"]
+    assert client.get(f"/checklists/{first['checklist_id']}").status_code == 200
+
+
+def test_taken_id_is_a_conflict_and_nothing_changes(client):
+    response = client.post(
+        "/checklists", json=rubric(client, checklist_id=CHECKLIST_ID, title="Чужой")
+    )
+    assert response.status_code == 409 and isinstance(response.json()["detail"], str)
+    latest = client.get(f"/checklists/{CHECKLIST_ID}").json()
+    assert latest["version"] == 1 and latest["title"] != "Чужой"
+
+
+def test_broken_new_checklist_is_rejected(client):
+    for body in (
+        rubric(client, checklist_id="a/b"),
+        rubric(client, checklist_id=5),
+        rubric(client, criteria=[]),
+        {"title": "Без критериев"},
+    ):
+        response = client.post("/checklists", json=body)
+        assert response.status_code == 422, body
+        assert isinstance(response.json()["detail"], str)
+    assert len(client.get("/checklists").json()) == 1
+
+
+def test_created_checklist_can_be_used_for_evaluation(client):
+    client.post("/checklists", json=rubric(client, checklist_id="my-list"))
+    client.post("/transcripts", json=make_record())
+    job = run_job(client, ["syn-001"], checklist_id="my-list")
+    assert job["status"] == "done"
+    assert client.get("/evaluations").json()[0]["checklist_id"] == "my-list"

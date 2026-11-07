@@ -147,3 +147,20 @@ def test_source_results_are_protected_by_the_database(scored):
             conn.execute("UPDATE evaluation_runs SET results_json = '[]'")
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("UPDATE evaluation_runs SET score_json = '{}'")
+
+
+def test_appeals_filter_by_evaluation_and_status(make_client):
+    client = make_client(evaluator=CountingEvaluator())
+    put(client, "syn-001", "syn-002")
+    first, second = run_job(client, ["syn-001", "syn-002"])["evaluation_ids"]
+    one, two = appeal(client, first), appeal(client, first, "c07")
+    other = appeal(client, second)
+    decide(client, two["id"], decision="confirm")
+
+    def ids(query):
+        return {item["id"] for item in client.get(f"/appeals?{query}").json()}
+
+    assert ids(f"evaluation_id={first}") == {one["id"], two["id"]}
+    assert ids(f"evaluation_id={second}") == {other["id"]}
+    assert ids(f"evaluation_id={first}&status=open") == {one["id"]}
+    assert ids("evaluation_id=none") == set()

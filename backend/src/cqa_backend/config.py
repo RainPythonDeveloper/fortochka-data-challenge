@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     cqa_db_path: Path = BACKEND_DIR / "cqa.sqlite"
     cqa_cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     cqa_http_timeout_s: float = 30
-    cqa_eval_concurrency: int = Field(default=4, ge=1)
+    # Free cloud tiers limit the request rate: 3 slots, 3 seconds between model starts.
+    cqa_eval_concurrency: int = Field(default=3, ge=1)
+    cqa_eval_pause_s: float = Field(default=3, ge=0)
     cqa_eval_timeout_s: float = Field(default=300, gt=0)
     cqa_allow_mock: bool = False
 

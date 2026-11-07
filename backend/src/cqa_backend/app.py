@@ -16,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from cqa_backend import appeals, checklists, conversations, exports
+from cqa_backend import appeals, checklists, conversations, exports, reports
 from cqa_backend.config import Settings
 from cqa_backend.db import Database
 from cqa_backend.errors import ApiError
@@ -29,24 +29,24 @@ from cqa_backend.schemas import (
     ConversationDetail,
     ConversationSummary,
     DecisionCreate,
+    EvaluationCompare,
     EvaluationRequest,
     EvaluationRun,
     EvaluationSummary,
     ImportRequest,
     ImportResult,
     Job,
+    ReportSummary,
     TranscriptResult,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(
-    settings: Settings | None = None,
-    evaluator: Evaluator | None = None,
-    transport: httpx.BaseTransport | None = None,
-) -> FastAPI:
-    settings = settings or Settings()
+def build_service(
+    settings: Settings, evaluator: Evaluator | None = None
+) -> tuple[Database, EvaluationService]:
+    """Shared by the server and the control run, so both mask secrets the same way."""
     for secret in (
         settings.cqa_api_url,
         os.environ.get("OPENAI_API_KEY"),
@@ -55,7 +55,16 @@ def create_app(
         register_secret(secret)
     setup_logging()
     db = Database(settings.cqa_db_path)
-    service = EvaluationService(db, settings, evaluator or evaluate)
+    return db, EvaluationService(db, settings, evaluator or evaluate)
+
+
+def create_app(
+    settings: Settings | None = None,
+    evaluator: Evaluator | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> FastAPI:
+    settings = settings or Settings()
+    db, service = build_service(settings, evaluator)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -141,6 +150,10 @@ def create_app(
     def get_checklists() -> list[ChecklistSummary]:
         return checklists.list_checklists(db)
 
+    @app.post("/checklists", response_model=ChecklistVersion)
+    def create_checklist(body: dict[str, Any] = Body(...)) -> ChecklistVersion:
+        return checklists.create_checklist(db, body)
+
     @app.get("/checklists/{checklist_id}", response_model=ChecklistVersion)
     def get_checklist(checklist_id: str) -> ChecklistVersion:
         return checklists.get_checklist(db, checklist_id)
@@ -167,6 +180,11 @@ def create_app(
     def get_evaluations(conversation_id: str | None = None) -> list[EvaluationSummary]:
         return service.list_runs(conversation_id)
 
+    # Declared before `/evaluations/{run_id}`, which would otherwise take "compare" as an id.
+    @app.get("/evaluations/compare", response_model=EvaluationCompare)
+    def compare_evaluations(a: str, b: str) -> EvaluationCompare:
+        return reports.compare_runs(db, a, b)
+
     @app.get("/evaluations/{run_id}", response_model=EvaluationRun)
     def get_evaluation(run_id: str) -> EvaluationRun:
         return service.get_run(run_id)
@@ -176,12 +194,18 @@ def create_app(
         return appeals.create_appeal(db, body)
 
     @app.get("/appeals", response_model=list[Appeal])
-    def get_appeals(status: Literal["open", "decided"] | None = None) -> list[Appeal]:
-        return appeals.list_appeals(db, status)
+    def get_appeals(
+        status: Literal["open", "decided"] | None = None, evaluation_id: str | None = None
+    ) -> list[Appeal]:
+        return appeals.list_appeals(db, status, evaluation_id)
 
     @app.post("/appeals/{appeal_id}/decisions", response_model=Appeal)
     def create_decision(appeal_id: str, body: DecisionCreate) -> Appeal:
         return appeals.decide(db, appeal_id, body)
+
+    @app.get("/reports/summary", response_model=ReportSummary)
+    def report_summary(group_id: str | None = None) -> ReportSummary:
+        return reports.summary(db, group_id)
 
     @app.get("/exports/ai-results")
     def export_ai_results(

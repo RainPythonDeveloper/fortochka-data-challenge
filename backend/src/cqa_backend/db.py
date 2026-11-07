@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS job_items (
     status TEXT NOT NULL,
     evaluation_id TEXT,
     error TEXT,
+    checklist_id TEXT,
+    checklist_version INTEGER,
     PRIMARY KEY (job_id, position)
 );
 
@@ -106,6 +108,10 @@ class Database:
         with self.read() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(job_items)")}
+            for name, kind in (("checklist_id", "TEXT"), ("checklist_version", "INTEGER")):
+                if name not in columns:  # a database from before per-dialogue checklists
+                    conn.execute(f"ALTER TABLE job_items ADD COLUMN {name} {kind}")
 
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:

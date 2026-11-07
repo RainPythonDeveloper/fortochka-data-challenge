@@ -104,6 +104,7 @@ def settings(tmp_path) -> Settings:  # noqa: ANN001
         cqa_db_path=tmp_path / "test.sqlite",
         cqa_api_url=API_URL,
         cqa_allow_mock=True,
+        cqa_eval_pause_s=0,
         llm_provider=None,
         llm_model=None,
     )

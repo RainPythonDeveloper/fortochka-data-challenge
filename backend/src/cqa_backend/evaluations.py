@@ -30,7 +30,7 @@ from cqa_ai.contracts import (
 )
 from pydantic import ValidationError
 
-from cqa_backend.checklists import get_checklist
+from cqa_backend.checklists import get_checklist, latest_by_channel
 from cqa_backend.config import Settings, resolve_evaluator_config
 from cqa_backend.db import Database, now_iso
 from cqa_backend.errors import ApiError, describe_validation
@@ -49,6 +49,7 @@ Evaluator = Callable[
     [ConversationSnapshot, ChecklistVersion, EvaluatorConfig], Awaitable[EvaluationOutput]
 ]
 MAX_ERROR_LENGTH = 500
+AUTO_CHECKLIST = "auto"
 
 
 def evaluator_key(config: EvaluatorConfig) -> str:
@@ -85,20 +86,30 @@ class EvaluationService:
         self.settings = settings
         self.evaluator = evaluator
         self.semaphore = asyncio.Semaphore(settings.cqa_eval_concurrency)
+        self.pace_lock = asyncio.Lock()
+        self.next_start = 0.0
         self.tasks: set[asyncio.Task[None]] = set()
 
     # Job lifecycle
 
     def create_job(self, request: EvaluationRequest) -> Job:
-        checklist = get_checklist(self.db, request.checklist_id, request.version)
+        if request.checklist_id is None and request.version is not None:
+            raise ApiError(422, "Поле version требует checklist_id")
+        explicit = (
+            get_checklist(self.db, request.checklist_id, request.version)
+            if request.checklist_id
+            else None
+        )
+        by_channel = {} if explicit else latest_by_channel(self.db)
         conversation_ids = list(dict.fromkeys(request.conversation_ids))
         job_id = str(uuid.uuid4())
         with self.db.tx() as conn:
             marks = ",".join("?" * len(conversation_ids))
             known = {
-                row["id"]
+                row["id"]: row["channel"]
                 for row in conn.execute(
-                    f"SELECT id FROM conversations WHERE id IN ({marks})", conversation_ids
+                    f"SELECT id, channel FROM conversations WHERE id IN ({marks})",
+                    conversation_ids,
                 )
             }
             unknown = [item for item in conversation_ids if item not in known]
@@ -106,11 +117,31 @@ class EvaluationService:
                 raise ApiError(404, f"Диалоги не найдены: {redact(', '.join(unknown))[:300]}")
             conn.execute(
                 "INSERT INTO jobs VALUES (?, 'queued', ?, ?, ?, NULL, ?)",
-                (job_id, checklist.checklist_id, checklist.version, request.force, now_iso()),
+                (
+                    job_id,
+                    explicit.checklist_id if explicit else AUTO_CHECKLIST,
+                    explicit.version if explicit else 0,
+                    request.force,
+                    now_iso(),
+                ),
             )
+            # The version is fixed here, so a resumed job scores what was asked for.
+            items = []
+            for index, item in enumerate(conversation_ids):
+                chosen = explicit or by_channel.get(known[item])
+                items.append(
+                    (
+                        job_id,
+                        index,
+                        item,
+                        chosen.checklist_id if chosen else None,
+                        chosen.version if chosen else None,
+                    )
+                )
             conn.executemany(
-                "INSERT INTO job_items VALUES (?, ?, ?, 'pending', NULL, NULL)",
-                [(job_id, index, item) for index, item in enumerate(conversation_ids)],
+                "INSERT INTO job_items (job_id, position, conversation_id, status, "
+                "checklist_id, checklist_version) VALUES (?, ?, ?, 'pending', ?, ?)",
+                items,
             )
         self._spawn(job_id)
         return self.get_job(job_id)
@@ -152,6 +183,11 @@ class EvaluationService:
             self._spawn(row["id"])
         return len(rows)
 
+    async def wait(self) -> None:
+        """Wait for all running jobs. Used by the control run."""
+        while self.tasks:
+            await asyncio.gather(*list(self.tasks), return_exceptions=True)
+
     async def shutdown(self) -> None:
         tasks = list(self.tasks)
         for task in tasks:
@@ -162,13 +198,10 @@ class EvaluationService:
         try:
             await asyncio.to_thread(self._set_job, job_id, "running", None)
             job, pending = await asyncio.to_thread(self._load_pending, job_id)
-            checklist = await asyncio.to_thread(
-                get_checklist, self.db, job["checklist_id"], job["checklist_version"]
-            )
             outcomes = await asyncio.gather(
                 *(
-                    self._process(job_id, position, conversation_id, checklist, bool(job["force"]))
-                    for position, conversation_id in pending
+                    self._process(job_id, position, conversation_id, target, bool(job["force"]))
+                    for position, conversation_id, target in pending
                 ),
                 return_exceptions=True,
             )
@@ -193,15 +226,31 @@ class EvaluationService:
         with self.db.tx() as conn:
             conn.execute("UPDATE jobs SET status = ?, error = ? WHERE id = ?", (status, error, job_id))
 
-    def _load_pending(self, job_id: str) -> tuple[sqlite3.Row, list[tuple[int, str]]]:
+    def _load_pending(
+        self, job_id: str
+    ) -> tuple[sqlite3.Row, list[tuple[int, str, ChecklistVersion | None]]]:
         with self.db.read() as conn:
             job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             rows = conn.execute(
-                "SELECT position, conversation_id FROM job_items "
-                "WHERE job_id = ? AND status = 'pending' ORDER BY position",
+                "SELECT position, conversation_id, checklist_id, checklist_version "
+                "FROM job_items WHERE job_id = ? AND status = 'pending' ORDER BY position",
                 (job_id,),
             ).fetchall()
-        return job, [(row["position"], row["conversation_id"]) for row in rows]
+        loaded: dict[tuple[str, int], ChecklistVersion] = {}
+        pending = []
+        for row in rows:
+            # Items of jobs created before per-dialogue checklists have no own columns.
+            key = (
+                row["checklist_id"] or job["checklist_id"],
+                row["checklist_version"] or job["checklist_version"],
+            )
+            target = None
+            if key[0] != AUTO_CHECKLIST:
+                if key not in loaded:
+                    loaded[key] = get_checklist(self.db, *key)
+                target = loaded[key]
+            pending.append((row["position"], row["conversation_id"], target))
+        return job, pending
 
     # One dialogue
 
@@ -210,16 +259,18 @@ class EvaluationService:
         job_id: str,
         position: int,
         conversation_id: str,
-        checklist: ChecklistVersion,
+        checklist: ChecklistVersion | None,
         force: bool,
     ) -> None:
         async with self.semaphore:
             snapshot = await asyncio.to_thread(self._load_snapshot, conversation_id)
             hashes = {
                 "content_hash": content_hash(snapshot),
-                "checklist_hash": checklist_hash(checklist),
+                "checklist_hash": checklist_hash(checklist) if checklist else "",
             }
             try:
+                if checklist is None:
+                    raise LookupError(f"Нет чек-листа для канала {redact(snapshot.channel)[:64]!r}")
                 draft = await self._evaluate(snapshot, checklist, force, hashes)
             except Exception as exc:  # noqa: BLE001 - one dialogue must not stop the batch
                 logger.warning("evaluation of %s failed: %s", conversation_id, type(exc).__name__)
@@ -257,6 +308,7 @@ class EvaluationService:
             if source is not None:
                 return self._from_cache(source, snapshot, checklist, key, evaluator_log)
 
+        await self._wait_for_turn()
         started = time.perf_counter()
         output = await asyncio.wait_for(
             self.evaluator(snapshot, checklist, config),
@@ -280,6 +332,17 @@ class EvaluationService:
             snapshot, checklist, output.results, score, output.review_status.value,
             output.review_reasons, log, key,
         )
+
+    async def _wait_for_turn(self) -> None:
+        """Space out model calls. Cache hits never get here, so they cost no time."""
+        pause = self.settings.cqa_eval_pause_s
+        if pause <= 0:
+            return
+        async with self.pace_lock:
+            delay = self.next_start - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            self.next_start = time.monotonic() + pause
 
     def _find_cached(self, hashes: dict[str, str], key: str) -> sqlite3.Row | None:
         with self.db.read() as conn:
@@ -351,7 +414,7 @@ class EvaluationService:
         job_id: str,
         position: int,
         snapshot: ConversationSnapshot,
-        checklist: ChecklistVersion,
+        checklist: ChecklistVersion | None,
         hashes: dict[str, str],
         draft: Draft,
     ) -> None:
@@ -369,8 +432,11 @@ class EvaluationService:
                     (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    run_id, snapshot.conversation_id, checklist.checklist_id, checklist.version,
-                    checklist.model_dump_json(), snapshot.model_dump_json(exclude={"audio_url"}),
+                    run_id, snapshot.conversation_id,
+                    checklist.checklist_id if checklist else "",
+                    checklist.version if checklist else 0,
+                    checklist.model_dump_json() if checklist else "null",
+                    snapshot.model_dump_json(exclude={"audio_url"}),
                     draft.status, draft.error, results, score, results, score,
                     draft.review_status, json.dumps(draft.review_reasons, ensure_ascii=False), log,
                     hashes["content_hash"], hashes["checklist_hash"], draft.key,

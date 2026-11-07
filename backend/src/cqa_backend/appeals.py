@@ -51,11 +51,15 @@ def create_appeal(db: Database, body: AppealCreate) -> Appeal:
     return _appeal(row)
 
 
-def list_appeals(db: Database, status: str | None) -> list[Appeal]:
-    clause, params = ("WHERE status = ?", (status,)) if status else ("", ())
+def list_appeals(
+    db: Database, status: str | None = None, evaluation_id: str | None = None
+) -> list[Appeal]:
+    filters = {"status": status, "evaluation_id": evaluation_id}
+    used = {key: value for key, value in filters.items() if value}
+    clause = f"WHERE {' AND '.join(f'{key} = ?' for key in used)}" if used else ""
     with db.read() as conn:
         rows = conn.execute(
-            f"SELECT * FROM appeals {clause} ORDER BY rowid DESC", params
+            f"SELECT * FROM appeals {clause} ORDER BY rowid DESC", list(used.values())
         ).fetchall()
     return [_appeal(row) for row in rows]
 
