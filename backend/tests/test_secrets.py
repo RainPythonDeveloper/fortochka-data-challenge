@@ -13,6 +13,7 @@ from conftest import (
     run_job,
 )
 
+from cqa_backend.app import build_service
 from cqa_backend.redact import RedactingFilter, redact
 
 
@@ -88,6 +89,13 @@ def test_dialogue_text_does_not_reach_logs(make_client, caplog):
     client.post("/transcripts", json=make_record())
     run_job(client, ["syn-001"])
     assert "Вопрос про тариф" not in caplog.text
+
+
+def test_nvidia_key_is_masked_in_errors_and_logs(settings, monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "plain-looking-provider-key")
+    build_service(settings)
+    assert redact("401 for key plain-looking-provider-key") == "401 for key [masked]"
+    assert redact("nvapi-Abc123_def456") == "[masked]"
 
 
 def test_redact_masks_urls_and_bare_signatures():

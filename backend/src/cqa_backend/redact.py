@@ -14,7 +14,7 @@ MASK = "[masked]"
 _PATTERNS = (
     re.compile(r"[a-z][a-z0-9+.-]*://[^\s\"'<>]+", re.IGNORECASE),
     re.compile(r"\b(sig|signature|token|api[-_]?key)=[^&\s\"'<>]+", re.IGNORECASE),
-    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"),
+    re.compile(r"\b(sk|nvapi)-[A-Za-z0-9_-]{8,}"),
 )
 _secrets: set[str] = set()
 

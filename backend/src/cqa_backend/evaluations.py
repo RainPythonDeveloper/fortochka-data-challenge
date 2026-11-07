@@ -330,6 +330,18 @@ class EvaluationService:
             "cost_usd": sum(costs) if costs else None,
             "evaluator": evaluator_log,
         }
+        # `evaluate` reports a model failure or a refusal to send a call as a result with
+        # every criterion failed. Nothing was assessed, so there is no score to keep.
+        if all(item.status is ResultStatus.FAILED for item in output.results):
+            reason = next((item.justification for item in output.results), "")
+            return Draft(
+                status="failed",
+                error=redact(reason or "Оценщик не вернул результатов")[:MAX_ERROR_LENGTH],
+                review_status=ReviewStatus.FLAGGED.value,
+                review_reasons=[*output.review_reasons, "evaluation_failed"],
+                log=log,
+                key=key,
+            )
         try:
             score = calculate_score(checklist, output.results)
         except Exception as exc:

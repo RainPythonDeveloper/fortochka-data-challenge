@@ -47,12 +47,8 @@ def build_service(
     settings: Settings, evaluator: Evaluator | None = None
 ) -> tuple[Database, EvaluationService]:
     """Shared by the server and the control run, so both mask secrets the same way."""
-    for secret in (
-        settings.cqa_api_url,
-        os.environ.get("OPENAI_API_KEY"),
-        os.environ.get("ANTHROPIC_API_KEY"),
-    ):
-        register_secret(secret)
+    register_secret(settings.cqa_api_url)
+    register_secret(os.environ.get("NVIDIA_API_KEY"))
     setup_logging()
     db = Database(settings.cqa_db_path)
     return db, EvaluationService(db, settings, evaluator or evaluate)

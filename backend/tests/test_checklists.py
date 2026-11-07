@@ -1,20 +1,19 @@
 import sqlite3
 
 import pytest
+from cqa_ai import load_default_checklists
 from conftest import CHECKLIST_ID, make_record, new_version, run_job
 
 
 def test_defaults_are_loaded_once(make_client):
     client = make_client()
-    assert client.get("/checklists").json() == [
-        {
-            "checklist_id": CHECKLIST_ID,
-            "title": client.get(f"/checklists/{CHECKLIST_ID}").json()["title"],
-            "latest_version": 1,
-            "channels": ["agent chat"],
-        }
-    ]
-    assert len(make_client().get("/checklists").json()) == 1
+    listed = client.get("/checklists").json()
+    assert {item["checklist_id"] for item in listed} == {
+        item.checklist_id for item in load_default_checklists()
+    }
+    chat = next(item for item in listed if item["checklist_id"] == CHECKLIST_ID)
+    assert chat["latest_version"] == 1 and chat["channels"] == ["agent chat"]
+    assert make_client().get("/checklists").json() == listed
 
 
 def test_new_version_ignores_the_version_field(client):
@@ -79,6 +78,7 @@ def rubric(client, **extra):
 
 
 def test_user_creates_a_checklist_with_version_one(client):
+    before = len(client.get("/checklists").json())
     response = client.post(
         "/checklists", json=rubric(client, checklist_id="my-list", version=7, title="Мой")
     )
@@ -86,7 +86,7 @@ def test_user_creates_a_checklist_with_version_one(client):
     created = response.json()
     assert created["checklist_id"] == "my-list" and created["version"] == 1
     assert client.get("/checklists/my-list").json()["title"] == "Мой"
-    assert len(client.get("/checklists").json()) == 2
+    assert len(client.get("/checklists").json()) == before + 1
 
     body = client.get("/checklists/my-list").json()
     assert client.post("/checklists/my-list/versions", json=body).json()["version"] == 2
@@ -109,6 +109,7 @@ def test_taken_id_is_a_conflict_and_nothing_changes(client):
 
 
 def test_broken_new_checklist_is_rejected(client):
+    before = client.get("/checklists").json()
     for body in (
         rubric(client, checklist_id="a/b"),
         rubric(client, checklist_id=5),
@@ -118,7 +119,7 @@ def test_broken_new_checklist_is_rejected(client):
         response = client.post("/checklists", json=body)
         assert response.status_code == 422, body
         assert isinstance(response.json()["detail"], str)
-    assert len(client.get("/checklists").json()) == 1
+    assert client.get("/checklists").json() == before
 
 
 def test_created_checklist_can_be_used_for_evaluation(client):

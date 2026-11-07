@@ -69,8 +69,8 @@ def summary(db: Database, group_id: str | None) -> ReportSummary:
     rows = [dict(row) for row in latest]
     states = Counter(row["status"] for row in rows)
     logs = [json.loads(row["log_json"]) for row in runs]
-    # A cache hit made no model call, so it says nothing about latency or cost.
-    called = [log for log in logs if not log.get("cache_hit")]
+    # A cache hit or a refused call made no model call: no latency, no cost.
+    called = [log for log in logs if log.get("attempts")]
     latencies = [log["latency_ms"] for log in called if log.get("latency_ms") is not None]
     costs = [log["cost_usd"] for log in called if log.get("cost_usd") is not None]
 

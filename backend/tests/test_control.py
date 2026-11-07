@@ -4,6 +4,7 @@ import json
 
 import httpx
 import pytest
+from cqa_ai.contracts import ResultStatus
 from conftest import AUDIO_URL, CountingEvaluator, make_payload, make_record
 
 from cqa_backend import checklists
@@ -142,17 +143,39 @@ def test_cost_is_summed_over_retries(settings, tmp_path):
     inner = CountingEvaluator()
 
     async def priced(snapshot, checklist, config):
-        if snapshot.conversation_id == "ctl-00" and not state["failed"]:
-            state["failed"] = True
-            raise RuntimeError("rate limit")
         output = await inner(snapshot, checklist, config)
         output.attempts[0].cost_usd = 0.1
+        if snapshot.conversation_id == "ctl-00" and not state["failed"]:
+            state["failed"] = True
+            for result in output.results:
+                result.status, result.answer = ResultStatus.FAILED, None
+                result.justification = "rate limit"
         return output
 
     report = control(settings, options(tmp_path), evaluator=priced)
-    assert report.ok and report.cost_usd == pytest.approx(1.0)
-    assert report.runs == 11 and report.runs_without_cost == 1
-    assert "без учёта 1" in format_report(report)
+    assert report.ok and report.rounds == 2
+    assert report.cost_usd == pytest.approx(1.1) and report.runs == 11
+
+
+def test_free_api_cost_is_zero_and_not_unknown(settings, tmp_path):
+    async def free(snapshot, checklist, config):
+        output = await CountingEvaluator()(snapshot, checklist, config)
+        output.attempts[0].cost_usd = 0
+        return output
+
+    report = control(settings, options(tmp_path), evaluator=free)
+    assert report.cost_usd == 0 and report.runs_without_cost == 0
+    assert "$0.0000" in format_report(report)
+
+
+def test_cost_gap_is_reported(settings, tmp_path):
+    async def mixed(snapshot, checklist, config):
+        output = await CountingEvaluator()(snapshot, checklist, config)
+        output.attempts[0].cost_usd = None if snapshot.conversation_id == "ctl-00" else 0.1
+        return output
+
+    report = control(settings, options(tmp_path), evaluator=mixed)
+    assert report.runs_without_cost == 1 and "без учёта 1" in format_report(report)
 
 
 def add_checklist(settings, checklist_id, channels):
@@ -179,9 +202,9 @@ def test_mixed_channels_with_assignment_and_report(settings, tmp_path):
 
 
 def test_ambiguous_channel_stops_the_run_with_a_clear_reason(settings, tmp_path):
-    add_checklist(settings, "voice-a", ["voice call"])
-    add_checklist(settings, "voice-b", ["voice call"])
-    records = [make_record("call", channel="voice call")]
+    add_checklist(settings, "other-a", ["web form"])
+    add_checklist(settings, "other-b", ["web form"])
+    records = [make_record("call", channel="web form")]
     with pytest.raises(ApiError, match="checklists_by_channel"):
         control(settings, options(tmp_path, expected_records=1), records)
 

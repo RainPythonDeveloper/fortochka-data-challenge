@@ -40,7 +40,7 @@ def test_summary_counts_dialogues_by_language_and_channel(make_client):
     assert report["evaluators"][0]["provider"] == "mock"
     assert report["mock_used"] is True
     assert report["avg_latency_ms"] is not None
-    assert report["total_cost_usd"] is None and report["runs_without_cost"] == 2
+    assert report["total_cost_usd"] is None and report["runs_without_cost"] == 1
     assert client.get("/reports/summary").json()["conversations"] == 4
 
 
@@ -58,6 +58,19 @@ def test_summary_sums_cost_without_cache_hits(make_client):
     report = client.get("/reports/summary").json()
     assert report["total_cost_usd"] == 0.5 and report["runs_without_cost"] == 0
     assert report["model_attempts"] == 2
+
+
+def test_free_api_cost_stays_zero_in_the_summary(make_client):
+    async def free(snapshot, checklist, config):
+        output = await CountingEvaluator()(snapshot, checklist, config)
+        output.attempts[0].cost_usd = 0
+        return output
+
+    client = make_client(evaluator=free)
+    put(client, "a")
+    run_job(client, ["a"])
+    report = client.get("/reports/summary").json()
+    assert report["total_cost_usd"] == 0 and report["runs_without_cost"] == 0
 
 
 def test_summary_of_an_empty_database(client):

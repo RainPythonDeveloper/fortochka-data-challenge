@@ -170,11 +170,12 @@ def _collect_usage(service: EvaluationService, report: ControlReport, job_ids: l
     report.checklists = sorted(
         {f"{run.checklist_id} v{run.checklist_version}" for run in runs if run.checklist_id}
     )
-    costs = [log.cost_usd for log in logs if not log.cache_hit and log.cost_usd is not None]
+    called = [log for log in logs if log.attempts]
+    costs = [log.cost_usd for log in called if log.cost_usd is not None]
     report.runs = len(logs)
     report.cache_hits = sum(log.cache_hit for log in logs)
     report.cost_usd = round(sum(costs), 6) if costs else None
-    report.runs_without_cost = sum(not log.cache_hit for log in logs) - len(costs)
+    report.runs_without_cost = len(called) - len(costs)
 
 
 async def run_control(

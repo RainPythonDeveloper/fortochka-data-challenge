@@ -1,7 +1,28 @@
 import asyncio
 import time
 
-from conftest import CHECKLIST_ID, CountingEvaluator, make_record, new_version, put, run_job, wait_for_job
+import pytest
+from cqa_ai.contracts import (
+    CriterionResult,
+    EvaluationOutput,
+    EvaluatorConfig,
+    ModelAttempt,
+    ResultStatus,
+    ReviewStatus,
+)
+from conftest import (
+    AUDIO_URL,
+    CHECKLIST_ID,
+    CountingEvaluator,
+    make_record,
+    new_version,
+    put,
+    run_job,
+    wait_for_job,
+)
+
+from cqa_backend.config import Settings, resolve_evaluator_config
+from cqa_backend.evaluations import evaluator_key
 
 
 def set_weights(first: float, second: float):
@@ -197,7 +218,7 @@ def test_real_provider_is_never_replaced_by_the_mock(make_client):
     put(client, "syn-001")
     job = run_job(client, ["syn-001"])
     assert job["status"] == "failed"
-    assert "'openai' is not available" in job["errors"][0]
+    assert "openai" in job["errors"][0]
     assert client.get(f"/evaluations/{job['evaluation_ids'][0]}").json()["results"] == []
 
 
@@ -268,3 +289,131 @@ def test_channel_outside_the_checklist_is_flagged(client):
     run_id = run_job(client, ["syn-v"])["evaluation_ids"][0]
     run = client.get(f"/evaluations/{run_id}").json()
     assert "channel_not_in_checklist" in run["review_reasons"]
+
+
+class FailingOutputEvaluator:
+    """Reports a failure the way `evaluate` does: a result, not an exception."""
+
+    def __init__(self, reason, flag="model_call_failed", attempts=1, failed_only=None):
+        self.reason, self.flag, self.attempts = reason, flag, attempts
+        self.failed_only = failed_only
+        self.calls = 0
+        self.healed = False
+
+    async def __call__(self, snapshot, checklist, config):
+        self.calls += 1
+        output = await CountingEvaluator(c01="yes")(snapshot, checklist, config)
+        if self.healed:
+            return output
+        for result in output.results:
+            if self.failed_only is None or result.criterion_id in self.failed_only:
+                result.status, result.answer = ResultStatus.FAILED, None
+                result.justification = self.reason
+                result.review_flags = [self.flag]
+        output.attempts = [
+            ModelAttempt(provider="nvidia", model="m", attempt=index + 1, cost_usd=0.5)
+            for index in range(self.attempts)
+        ]
+        output.review_status = ReviewStatus.FLAGGED
+        output.review_reasons = [self.flag]
+        return output
+
+
+def test_all_criteria_failed_is_a_failed_run_with_its_attempts(make_client):
+    evaluator = FailingOutputEvaluator(f"Модель не дала ответа: 429 at {AUDIO_URL}", attempts=3)
+    client = make_client(evaluator=evaluator)
+    put(client, "syn-001")
+
+    job = run_job(client, ["syn-001"])
+
+    assert job["status"] == "failed" and job["failed"] == 1
+    assert "Модель не дала ответа: 429" in job["errors"][0]
+    assert "AUDIOSIGNATURE123" not in job["errors"][0]
+    run = client.get(f"/evaluations/{job['evaluation_ids'][0]}").json()
+    assert run["status"] == "failed" and run["error"].startswith("Модель не дала ответа")
+    assert run["total"] is None and run["results"] == []
+    assert run["score"]["partial_total"] is None
+    assert len(run["log"]["attempts"]) == 3 and run["log"]["cost_usd"] == 1.5
+    assert run["review_reasons"] == ["model_call_failed", "evaluation_failed"]
+    report = client.get("/reports/summary").json()
+    assert report["total_cost_usd"] == 1.5 and report["failed"] == 1
+    assert client.get("/exports/ai-results").json()["failed"] == 1
+
+
+def test_failure_returned_as_a_result_is_never_reused_from_the_cache(make_client):
+    evaluator = FailingOutputEvaluator("лимит запросов")
+    client = make_client(evaluator=evaluator)
+    put(client, "syn-001")
+    assert run_job(client, ["syn-001"])["status"] == "failed"
+    assert run_job(client, ["syn-001"])["status"] == "failed"
+    assert evaluator.calls == 2
+
+    evaluator.healed = True
+    job = run_job(client, ["syn-001"])
+
+    assert job["status"] == "done" and evaluator.calls == 3
+    run = client.get(f"/evaluations/{job['evaluation_ids'][0]}").json()
+    assert run["log"]["cache_hit"] is False and run["total"] == 100
+
+
+def test_call_refused_for_personal_data_comes_back_once_allowed(make_client):
+    evaluator = FailingOutputEvaluator(
+        "Звонок не отправлен", flag="personal_data_not_sent", attempts=0
+    )
+    client = make_client(evaluator=evaluator)
+    client.post("/transcripts", json=make_record("syn-call", channel="voice call"))
+
+    job = run_job(client, ["syn-call"])
+    assert job["status"] == "failed" and "Звонок не отправлен" in job["errors"][0]
+    run = client.get(f"/evaluations/{job['evaluation_ids'][0]}").json()
+    assert "personal_data_not_sent" in run["review_reasons"]
+    assert run["log"]["attempts"] == []
+    report = client.get("/reports/summary").json()
+    assert report["avg_latency_ms"] is None and report["runs_without_cost"] == 0
+
+    evaluator.healed = True
+    assert run_job(client, ["syn-call"])["status"] == "done"
+    assert evaluator.calls == 2
+
+
+def test_some_failed_criteria_keep_the_run_done_and_partial(make_client):
+    evaluator = FailingOutputEvaluator("нет ответа", failed_only={"c01"})
+    client = make_client(evaluator=evaluator)
+    put(client, "syn-001")
+
+    job = run_job(client, ["syn-001"])
+
+    assert job["status"] == "done" and job["done"] == 1
+    run = client.get(f"/evaluations/{job['evaluation_ids'][0]}").json()
+    assert run["status"] == "done" and run["error"] is None
+    assert run["total"] is None and run["score"]["is_partial"] is True
+    assert run["score"]["partial_total"] == 90
+    assert run["score"]["missing_criteria"] == ["c01"]
+    assert len(run["results"]) == 8
+    assert "partial_result" in run["review_reasons"]
+    run_job(client, ["syn-001"])
+    assert evaluator.calls == 2  # a partial run is not a cache source
+
+
+def test_empty_output_is_a_failure(make_client):
+    async def empty(*_):
+        return EvaluationOutput(results=[])
+
+    client = make_client(evaluator=empty)
+    put(client, "syn-001")
+    job = run_job(client, ["syn-001"])
+    assert job["status"] == "failed" and "не вернул" in job["errors"][0]
+
+
+@pytest.mark.skipif(
+    "fallback_model" not in EvaluatorConfig.model_fields,
+    reason="needs the evaluator from feat/ai",
+)
+def test_fallback_model_is_part_of_the_cache_key():
+    def key(fallback):
+        settings = Settings(
+            _env_file=None, llm_provider="nvidia", llm_model="m", llm_fallback_model=fallback
+        )
+        return evaluator_key(resolve_evaluator_config(settings))
+
+    assert key("a") != key("b")

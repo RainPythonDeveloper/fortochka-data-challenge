@@ -165,6 +165,8 @@ class ReportChecklist(BaseModel):
 class ReportEvaluator(BaseModel):
     provider: str
     model: str
+    fallback_model: str | None = None
+    prompt_version: str | None = None
     pipeline: str
     temperature: float | None
     max_output_tokens: int
@@ -173,7 +175,8 @@ class ReportEvaluator(BaseModel):
 
 class ReportSummary(BaseModel):
     """Dialogue counts use the latest run of each dialogue. Latency and cost use every
-    run of the selection, so repeats and retries are not hidden."""
+    run with a model attempt, so repeats and retries are not hidden, while cache hits
+    and calls that were never sent do not distort them."""
 
     group_id: str | None
     generated_at: str

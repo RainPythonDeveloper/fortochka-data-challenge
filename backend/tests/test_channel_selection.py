@@ -6,13 +6,16 @@ from conftest import CHECKLIST_ID, CountingEvaluator, make_record, new_version, 
 from cqa_backend.config import Settings
 
 
-def add_voice_checklist(client):
+OTHER_CHANNEL = "web form"  # no standard checklist will ever claim it
+
+
+def add_other_checklist(client):
     body = client.get(f"/checklists/{CHECKLIST_ID}").json()
-    voice = {**body, "checklist_id": "any-voice-name", "channels": ["voice call"], "version": 1}
+    other = {**body, "checklist_id": "any-name", "channels": [OTHER_CHANNEL], "version": 1}
     with client.app.state.db.tx() as conn:
         conn.execute(
-            "INSERT INTO checklist_versions VALUES ('any-voice-name', 1, ?, 'now')",
-            (json.dumps(voice),),
+            "INSERT INTO checklist_versions VALUES ('any-name', 1, ?, 'now')",
+            (json.dumps(other),),
         )
 
 
@@ -23,16 +26,16 @@ def auto_job(client, ids, **extra):
 
 
 def test_checklist_is_chosen_by_channel_without_knowing_its_name(client):
-    add_voice_checklist(client)
+    add_other_checklist(client)
     put(client, "syn-chat")
-    client.post("/transcripts", json=make_record("syn-call", channel="voice call"))
+    client.post("/transcripts", json=make_record("syn-call", channel=OTHER_CHANNEL))
 
     job = auto_job(client, ["syn-chat", "syn-call"])
 
     assert job["status"] == "done" and job["done"] == 2
     runs = {item["conversation_id"]: item for item in client.get("/evaluations").json()}
     assert runs["syn-chat"]["checklist_id"] == CHECKLIST_ID
-    assert runs["syn-call"]["checklist_id"] == "any-voice-name"
+    assert runs["syn-call"]["checklist_id"] == "any-name"
     run = client.get(f"/evaluations/{runs['syn-call']['id']}").json()
     assert "channel_not_in_checklist" not in run["review_reasons"]
 
@@ -53,12 +56,12 @@ def test_explicit_checklist_works_as_before(client):
 
 def test_channel_without_a_checklist_fails_alone_and_stays_visible(client):
     put(client, "syn-chat")
-    client.post("/transcripts", json=make_record("syn-call", channel="voice call"))
+    client.post("/transcripts", json=make_record("syn-call", channel=OTHER_CHANNEL))
 
     job = auto_job(client, ["syn-chat", "syn-call"])
 
     assert job["status"] == "done" and (job["done"], job["failed"]) == (1, 1)
-    assert "voice call" in job["errors"][0]
+    assert OTHER_CHANNEL in job["errors"][0]
     failed = client.get("/evaluations?conversation_id=syn-call").json()[0]
     assert failed["status"] == "failed" and failed["total"] is None
     run = client.get(f"/evaluations/{failed['id']}").json()
@@ -97,23 +100,23 @@ def test_standard_checklist_always_gives_its_latest_version(client):
 
 
 def test_only_user_checklist_for_a_channel_is_taken(client):
-    add_checklist(client, "user-voice", ["voice call"])
-    client.post("/transcripts", json=make_record("syn-call", channel="voice call"))
+    add_checklist(client, "user-only", [OTHER_CHANNEL])
+    client.post("/transcripts", json=make_record("syn-call", channel=OTHER_CHANNEL))
     auto_job(client, ["syn-call"])
-    assert used(client, "syn-call") == ("user-voice", 1)
+    assert used(client, "syn-call") == ("user-only", 1)
 
 
 def test_several_user_checklists_without_a_standard_one_are_an_error(client):
-    add_checklist(client, "voice-a", ["voice call"])
-    add_checklist(client, "voice-b", ["voice call"])
+    add_checklist(client, "other-a", [OTHER_CHANNEL])
+    add_checklist(client, "other-b", [OTHER_CHANNEL])
     put(client, "syn-chat")
-    client.post("/transcripts", json=make_record("syn-call", channel="voice call"))
+    client.post("/transcripts", json=make_record("syn-call", channel=OTHER_CHANNEL))
 
     response = client.post("/evaluations", json={"conversation_ids": ["syn-chat", "syn-call"]})
 
     assert response.status_code == 422
     detail = response.json()["detail"]
-    assert "voice call" in detail and "voice-a" in detail and "voice-b" in detail
+    assert OTHER_CHANNEL in detail and "other-a" in detail and "other-b" in detail
     assert client.get("/evaluations").json() == []
     assert auto_job(client, ["syn-chat"])["status"] == "done"  # other channels are not affected
 

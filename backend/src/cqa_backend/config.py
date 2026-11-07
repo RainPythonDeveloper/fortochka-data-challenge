@@ -32,6 +32,7 @@ class Settings(BaseSettings):
 
     llm_provider: str | None = None
     llm_model: str | None = None
+    llm_fallback_model: str | None = None
     llm_pipeline: str = "single"
 
     @property
@@ -53,6 +54,10 @@ def resolve_evaluator_config(settings: Settings) -> EvaluatorConfig:
         )
     if not settings.llm_model:
         raise EvaluatorNotConfigured(f"Оценщик не настроен: для {provider!r} не задан LLM_MODEL")
+    # The fallback is set here and not left to `cqa_ai`, so it is part of the cache key.
     return EvaluatorConfig(
-        provider=provider, model=settings.llm_model, pipeline=settings.llm_pipeline
+        provider=provider,
+        model=settings.llm_model,
+        fallback_model=settings.llm_fallback_model,
+        pipeline=settings.llm_pipeline,
     )
