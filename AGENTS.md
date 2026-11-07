@@ -719,7 +719,7 @@ INPUT: immutable transcript, current rubric, approved references.
 - Проверка перед пушем:
 
 ```bash
-git grep -nE "sig=|powerplatform\.com" $(git rev-parse --abbrev-ref HEAD) -- . ':!AGENTS.md'
+git grep -nE "sig=|powerplatform\.com" $(git rev-parse --abbrev-ref HEAD) -- . ':!AGENTS.md' ':!README.md'
 ```
 
 В выводе не должно быть ни одной строки с подписью.

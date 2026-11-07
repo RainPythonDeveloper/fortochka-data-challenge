@@ -67,5 +67,5 @@ cd frontend && npm run build
 - `.env`, `data/`, PDF и базы SQLite в Git не попадают. Перед пушем проверьте, что в ветке нет подписанных ссылок:
 
 ```bash
-git grep -nE "sig=|powerplatform\.com" $(git rev-parse --abbrev-ref HEAD) -- . ':!AGENTS.md'
+git grep -nE "sig=|powerplatform\.com" $(git rev-parse --abbrev-ref HEAD) -- . ':!AGENTS.md' ':!README.md'
 ```
