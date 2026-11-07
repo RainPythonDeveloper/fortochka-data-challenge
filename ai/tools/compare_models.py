@@ -21,22 +21,33 @@ from cqa_ai.evaluation.metrics import _value, label_results, label_value
 from cqa_ai.rubric import NA_ANSWER
 
 ROOT = Path(__file__).resolve().parents[2] / "data" / "bench"
-MODELS = {
-    "Nemotron 3 Ultra": [
-        "s3-tune-v3/nvidia~nvidia_nemotron-3-ultra-550b-a55b__single__r1",
-        "s4-compare-A/nvidia~nvidia_nemotron-3-ultra-550b-a55b__single__r1",
-    ],
-    "Nemotron 3.5 Super-VL": [
-        "s3-tune-v3/nvidia~nvidia_nemotron-3.5-super-vl-120b-a12b__single__r1",
-        "s4-compare-B/nvidia~nvidia_nemotron-3.5-super-vl-120b-a12b__single__r1",
-    ],
-    "Gemma 4 31B": ["s6-gemma-v3/nvidia~google_gemma-4-31b-it__single__r1"],
-}
-PRICES = {  # USD per 1M tokens, OpenRouter catalog 2026-11-07
-    "Nemotron 3 Ultra": (0.60, 2.40),
-    "Nemotron 3.5 Super-VL": (0.15, 0.50),
-    "Gemma 4 31B": (0.20, 0.40),
-}
+import os
+
+# Which bench folder to compare: every model run inside it is picked up.
+# Usage: uv run python tools/compare_models.py [bench-folder]   (default s17-final)
+_SET = os.environ.get("COMPARE_SET") or (sys.argv[1] if len(sys.argv) > 1 else "s17-final")
+CHANNEL = "agent chat"
+
+
+def _discover() -> tuple[dict[str, list[str]], dict[str, tuple[float, float]]]:
+    from cqa_ai.providers.profiles import PAID_EQUIVALENT, split_model
+
+    models: dict[str, list[str]] = {}
+    prices: dict[str, tuple[float, float]] = {}
+    for combo in sorted((ROOT / _SET).glob("*/combo.json")):
+        meta = json.loads(combo.read_text(encoding="utf-8"))
+        if meta.get("pipeline", "single") != "single":
+            name = f"{meta['model']} [{meta['pipeline']}]"
+        else:
+            name = meta["model"]
+        name = name.replace("nvidia:", "")
+        models[name] = [f"{_SET}/{combo.parent.name}"]
+        model_id = split_model(meta["model"], "nvidia")[1]
+        prices[name] = PAID_EQUIVALENT.get(model_id, (0.0, 0.0))
+    return models, prices
+
+
+MODELS, PRICES = _discover()
 SCALES = {"c04": [0, 5, 10, 15, 20], "c06": [0, 4, 7, 10]}
 CRITERIA = [f"c0{i}" for i in range(1, 9)]
 TITLES = {
@@ -56,7 +67,7 @@ def load(paths):
             if not line.strip():
                 continue
             row = json.loads(line)
-            if row["channel"] != "agent chat":
+            if row["channel"] != CHANNEL:
                 continue
             cid = row["conversation_id"]
             if cid not in latest or not row.get("failed"):
@@ -107,8 +118,12 @@ def main():
     ok_ids = {
         name: {cid for cid, row in r.items() if not row.get("failed")} for name, r in runs.items()
     }
-    common = sorted(set.intersection(*ok_ids.values()))
-    print(f"Чатов в выборке (tune + compare): {len(all_ids)}; оценены всеми тремя: {len(common)}\n")
+    # A model that answered nothing (e.g. its endpoint was down) keeps its coverage
+    # row but must not empty the common set of the others.
+    answered = [ids for ids in ok_ids.values() if ids]
+    common = sorted(set.intersection(*answered)) if answered else []
+    kind = "Чатов" if CHANNEL == "agent chat" else "Звонков"
+    print(f"{kind} в выборке (tune + compare): {len(all_ids)}; оценены всеми тремя: {len(common)}\n")
 
     stats = {}
     mismatch = defaultdict(dict)  # (cid, crit) -> {model: (value, justification)}
@@ -218,7 +233,7 @@ def main():
 
     names = list(MODELS)
     rows = [
-        ("Покрытие (оценено / всего чатов)", "coverage"),
+        ("Покрытие (оценено / всего)", "coverage"),
         ("Совпадение по всем критериям", "acc"),
         *[(f"{c} {TITLES[c]}", c) for c in CRITERIA],
         ("c04 в пределах ±1 ступени", "c04±1"),
@@ -267,11 +282,15 @@ def main():
         for n in names:
             if n in by_model:
                 cells.append(f"**{by_model[n][0]}**")
+            elif cid not in ok_ids.get(n, set()):
+                cells.append("—")  # no answer from this model at all
             else:
                 cells.append(f"{exp} ✓")
         who = "все три" if len(by_model) == 3 else ", ".join(by_model)
         print(f"| {cid} | {c} | {exp} | " + " | ".join(cells) + f" | {who} |")
 
+    if CHANNEL != "agent chat":
+        return  # calls are real: their justifications may carry personal data
     print("\n## Обоснования моделей по расхождениям\n")
     for (cid, c), by_model in sorted(mismatch.items(), key=lambda x: (x[0][1], x[0][0])):
         why = labels[cid][c].get("why", "") if isinstance(labels[cid][c], dict) else ""
@@ -281,4 +300,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    for channel, title in (("agent chat", "Чаты"), ("voice call", "Звонки")):
+        CHANNEL = channel
+        print(f"\n# {title}\n")
+        main()
