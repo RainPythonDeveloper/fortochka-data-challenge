@@ -71,6 +71,10 @@ type ConversationSummary = {
   has_audio: boolean; group_id: string | null;
   latest_evaluation_id: string | null; latest_total: number | null;
   gross_error: boolean;
+  latest_status: "done" | "failed" | null; latest_error: string | null;
+  latest_reasons: string[]; latest_evaluated_at: string | null;
+  review_status: "clear" | "flagged" | null;
+  open_appeals: number;              // открытые апелляции по всем запускам диалога
 };
 type ConversationDetail = ConversationSummary & { turns: Turn[] };
 
@@ -89,6 +93,11 @@ type Job = {
   id: string; status: "queued" | "running" | "done" | "failed";
   total: number; done: number; failed: number;
   evaluation_ids: string[]; errors: string[];
+  current: {                         // диалоги в работе, только пока задача идёт
+    conversation_id: string;
+    stage: "parse" | "model" | "validate" | "score";
+    started_at: string;
+  }[];
 };
 
 type EvaluationSummary = {
@@ -109,6 +118,7 @@ type EvaluationRun = EvaluationSummary & {
     pipeline: string; attempts: ModelAttempt[]; cache_hit: boolean;
     cached_from: string | null; evaluator: Record<string, unknown> | null;
     latency_ms: number | null; cost_usd: number | null;
+    stages: { id: "parse" | "model" | "validate" | "score"; ms: number }[] | null;
   };
 };
 
@@ -174,6 +184,10 @@ type Appeal = {
 ```
 
 `Turn`, `ChecklistVersion`, `CriterionResult`, `ScoreSummary`, `ModelAttempt` повторяют модели из `contracts.py`.
+
+`Criterion.disabled_notes` хранит выключенные уточнения. Они не попадают в промпт, даже если это уточнения по умолчанию, которые иначе возвращаются по смыслу критерия. Интерфейс перекладывает текст между `team_notes` и `disabled_notes`. Поле входит в `checklist_hash`, только когда оно не пусто, поэтому хеши старых версий не меняются.
+
+`log.stages` показывает, сколько занял каждый этап. `validate` это время `evaluate` за вычетом вызовов модели. При взятии из кэша есть только `parse` и `score`, сбойный запуск хранит этапы, которые успел пройти, у старых запусков поля нет.
 
 Предупреждения импорта лежат в `ImportResult.errors` с префиксом `warning:`. `Job.done` считает только успешные диалоги. `latest_total` и `gross_error` у диалога показывают состояние после решений по апелляциям. Сбойный запуск имеет пустой `results` и `ScoreSummary` с итогом `null`.
 
