@@ -5,7 +5,8 @@ Additions to the contract: `error` on evaluations, `warnings` on POST /transcrip
 `cached_from` and `evaluator` in the run log, optional `checklist_id` in
 EvaluationRequest, `checklists_by_channel` there, null `checklist` on a run that had no checklist for its channel,
 POST /checklists, `evaluation_id` in GET /appeals, GET /reports/summary and
-GET /evaluations/compare.
+GET /evaluations/compare, `stages` in the run log, `current` on a job, and the `latest_*`,
+`open_appeals` and `review_status` fields of a conversation summary.
 """
 
 from __future__ import annotations
@@ -46,6 +47,12 @@ class ConversationSummary(BaseModel):
     latest_evaluation_id: str | None
     latest_total: float | None
     gross_error: bool
+    latest_status: Literal["done", "failed"] | None = None
+    latest_error: str | None = None
+    latest_reasons: list[str] = Field(default_factory=list)
+    latest_evaluated_at: str | None = None
+    review_status: Literal["clear", "flagged"] | None = None
+    open_appeals: int = 0
 
 
 class ConversationDetail(ConversationSummary):
@@ -71,6 +78,17 @@ class EvaluationRequest(BaseModel):
     force: bool = False
 
 
+StageId = Literal["parse", "model", "validate", "score"]
+
+
+class JobStage(BaseModel):
+    """What one dialogue of a running job is doing right now."""
+
+    conversation_id: str
+    stage: StageId
+    started_at: str
+
+
 class Job(BaseModel):
     id: str
     status: Literal["queued", "running", "done", "failed"]
@@ -79,6 +97,7 @@ class Job(BaseModel):
     failed: int
     evaluation_ids: list[str]
     errors: list[str]
+    current: list[JobStage] = Field(default_factory=list)
 
 
 class EvaluationSummary(BaseModel):
@@ -94,6 +113,11 @@ class EvaluationSummary(BaseModel):
     error: str | None = None
 
 
+class RunStage(BaseModel):
+    id: StageId
+    ms: float
+
+
 class RunLog(BaseModel):
     run_id: str
     content_hash: str
@@ -106,6 +130,7 @@ class RunLog(BaseModel):
     cost_usd: float | None = None
     cached_from: str | None = None
     evaluator: dict[str, Any] | None = None
+    stages: list[RunStage] | None = None  # absent on runs saved before the field
 
 
 class EvaluationRun(EvaluationSummary):
