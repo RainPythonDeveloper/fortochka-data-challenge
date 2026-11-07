@@ -26,6 +26,8 @@ export type Criterion = {
   na_when: string | null;
   levels: ScaleLevel[];
   team_notes: string[];
+  /** Notes switched off. Absent on a backend that cannot switch notes off. */
+  disabled_notes?: string[];
 };
 
 export type ChecklistVersion = {
@@ -113,6 +115,13 @@ export type ConversationSummary = {
   latest_evaluation_id: string | null;
   latest_total: number | null;
   gross_error: boolean;
+  // Optional: without them the list reads each run itself.
+  latest_status?: 'done' | 'failed' | null;
+  latest_error?: string | null;
+  latest_reasons?: string[];
+  latest_evaluated_at?: string | null;
+  review_status?: ReviewStatus | null;
+  open_appeals?: number;
 };
 export type ConversationDetail = ConversationSummary & { turns: Turn[] };
 export type TranscriptResult = ConversationSummary & { warnings: string[] };
@@ -135,6 +144,11 @@ export type EvaluationRequest = {
   force?: boolean;
 };
 
+export type StageId = 'parse' | 'model' | 'validate' | 'score';
+
+/** What one dialogue of a running job is doing now. */
+export type JobStage = { conversation_id: string; stage: StageId; started_at: string };
+
 export type Job = {
   id: string;
   status: 'queued' | 'running' | 'done' | 'failed';
@@ -143,6 +157,8 @@ export type Job = {
   failed: number;
   evaluation_ids: string[];
   errors: string[];
+  /** Absent on a backend that does not report stages. */
+  current?: JobStage[];
 };
 
 export type EvaluationSummary = {
@@ -171,6 +187,8 @@ export type RunLog = {
   cost_usd: number | null;
   cached_from: string | null;
   evaluator: Record<string, unknown> | null;
+  /** Absent on older runs. A cache hit has no model stage. */
+  stages?: { id: StageId; ms: number }[] | null;
 };
 
 export type EvaluationRun = EvaluationSummary & {

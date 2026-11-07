@@ -6,10 +6,10 @@ export type ValidationIssue = { criterionId: string | null; message: string };
 // non-empty text checks that a form needs and the model does not enforce.
 function checkCriterion(criterion: Criterion, sectionIds: Set<string>): string[] {
   const issues: string[] = [];
-  if (!criterion.title.trim()) issues.push('нужна формулировка');
+  if (!criterion.title.trim()) issues.push('нужно название');
   if (!Number.isFinite(criterion.weight) || criterion.weight < 0) issues.push('вес должен быть числом не меньше 0');
   if (!criterion.scored && criterion.weight !== 0) issues.push('у критерия без баллов вес должен быть 0');
-  if (criterion.allow_na && !criterion.na_when?.trim()) issues.push('при доступном N/A нужно условие N/A');
+  if (criterion.allow_na && !criterion.na_when?.trim()) issues.push('нужно условие «Когда не применимо»');
   if (!sectionIds.has(criterion.section)) issues.push('выберите существующую секцию');
 
   if (criterion.type === 'scale') {
@@ -22,24 +22,14 @@ function checkCriterion(criterion: Criterion, sectionIds: Set<string>): string[]
     }
     if (criterion.levels.some((level) => !level.text.trim())) issues.push('у каждой ступени нужно описание');
   } else if (criterion.levels.length) {
-    issues.push('у критерия да/нет не может быть ступеней');
+    issues.push('у критерия Да / Нет не может быть ступеней');
   }
   return issues;
 }
 
-const CHECKLIST_ID = /^[a-z0-9][a-z0-9_-]*$/;
-
-/** Only a new checklist has an editable id. Existing ones keep theirs. */
-export function validateNewChecklistId(id: string, taken: string[]): ValidationIssue[] {
-  if (!CHECKLIST_ID.test(id)) {
-    return [{ criterionId: null, message: 'Идентификатор: латиница в нижнем регистре, цифры, дефис, подчёркивание' }];
-  }
-  return taken.includes(id) ? [{ criterionId: null, message: 'Чек-лист с таким идентификатором уже есть' }] : [];
-}
-
 export function validateChecklist(checklist: ChecklistVersion): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  if (!checklist.title.trim()) issues.push({ criterionId: null, message: 'Нужно название чек-листа' });
+  if (!checklist.title.trim()) issues.push({ criterionId: null, message: 'Нужно название листа' });
   if (!checklist.criteria.length) issues.push({ criterionId: null, message: 'Нужен хотя бы один критерий' });
 
   const sectionIds = new Set(checklist.sections.map((section) => section.id));
@@ -49,13 +39,14 @@ export function validateChecklist(checklist: ChecklistVersion): ValidationIssue[
 
   const seen = new Set<string>();
   for (const criterion of checklist.criteria) {
-    if (!criterion.id.trim()) issues.push({ criterionId: criterion.id, message: 'У критерия нет идентификатора' });
+    const name = criterion.title.trim() || 'Новый критерий';
+    if (!criterion.id.trim()) issues.push({ criterionId: criterion.id, message: `${name}: нет идентификатора` });
     if (seen.has(criterion.id)) {
-      issues.push({ criterionId: criterion.id, message: `${criterion.id}: идентификатор повторяется` });
+      issues.push({ criterionId: criterion.id, message: `${name}: идентификатор повторяется` });
     }
     seen.add(criterion.id);
     for (const message of checkCriterion(criterion, sectionIds)) {
-      issues.push({ criterionId: criterion.id, message: `${criterion.id}: ${message}` });
+      issues.push({ criterionId: criterion.id, message: `${name}: ${message}` });
     }
   }
   return issues;
@@ -74,6 +65,7 @@ export function normalizeChecklist(checklist: ChecklistVersion): ChecklistVersio
       prompt: text(criterion.prompt),
       na_when: criterion.allow_na ? text(criterion.na_when) : null,
       levels: criterion.type === 'scale' ? criterion.levels : [],
+      team_notes: criterion.team_notes.map((note) => note.trim()).filter(Boolean),
     })),
   };
 }

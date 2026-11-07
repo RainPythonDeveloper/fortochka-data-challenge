@@ -1,331 +1,514 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { MoreHorizontal } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import type { ConversationSummary, ImportResult, TranscriptResult } from '../api/types';
-import { RunEvaluation } from '../components/RunEvaluation';
-import { Badge, Button, EmptyState, ErrorState, Field, LoadingState, Modal, inputClass } from '../components/ui';
+import type { Appeal, ConversationSummary, EvaluationRun, ImportResult } from '../api/types';
+import { Button, EmptyState, ErrorState, LoadingState, Menu, Panel, Spinner, Swap, Tag } from '../components/ui';
 import { host } from '../host/hostAdapter';
-import { channelLabel, fmtNumber, splitImportMessages } from '../lib/format';
-import { useJobs } from '../lib/jobs';
+import {
+  PERSONAL_DATA_FLAG,
+  STUB_FLAG,
+  channelLabel,
+  errorText,
+  fmtClock,
+  fmtDuration,
+  fmtNumber,
+  fmtRelative,
+  fmtScore,
+  splitImportMessages,
+} from '../lib/format';
+import { isActive, progressFor, useJobs, type Progress } from '../lib/jobs';
+import { FROM_CACHE, GROSS, stageName } from '../lib/labels';
+import { useCountUp, useElapsed } from '../lib/motion';
 import { useAsync } from '../lib/useAsync';
 
-function TotalCell({ item }: { item: ConversationSummary }) {
-  if (!item.latest_evaluation_id) return <span className="text-stone-400">Не оценён</span>;
-  if (item.latest_total === null) return <Badge tone="warn">Итога нет</Badge>;
-  return <span className="font-semibold tabular-nums">{fmtNumber(item.latest_total)}</span>;
+const REFRESH_MS = 3000;
+const SHORT_ERROR = 60;
+const ENTER_MS = 1500;
+const STAGE_PROGRESS = { parse: 0.1, model: 0.85, validate: 0.95, score: 0.95 } as const;
+
+type Tab = 'all' | 'attention' | 'appeals';
+
+type Finished = { ms: number | null };
+
+/** A summary with the fields of its latest run, however they were obtained. */
+type Row = ConversationSummary & {
+  status: 'done' | 'failed' | null;
+  error: string | null;
+  reasons: string[];
+  flagged: boolean;
+  evaluatedAt: string | null;
+  appeal: Appeal | null;
+  openAppeals: number;
+};
+
+function toRow(item: ConversationSummary, run: EvaluationRun | undefined, appeals: Appeal[]): Row {
+  const known = item.latest_status !== undefined;
+  const reasons = (known ? item.latest_reasons : run?.review_reasons) ?? [];
+  const review = known ? item.review_status : run?.review_status;
+  const own = appeals.filter((appeal) => appeal.evaluation_id === item.latest_evaluation_id);
+  return {
+    ...item,
+    status: (known ? item.latest_status : run?.status) ?? null,
+    error: (known ? item.latest_error : run?.error) ?? null,
+    reasons,
+    // The stub flag says who answered, not that the answer is disputed.
+    flagged: review === 'flagged' && reasons.some((reason) => reason !== STUB_FLAG),
+    evaluatedAt: (known ? item.latest_evaluated_at : run?.created_at) ?? null,
+    appeal: own[0] ?? null,
+    openAppeals: item.open_appeals ?? own.length,
+  };
 }
 
-function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [groupId, setGroupId] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ImportResult | null>(null);
-  const messages = result ? splitImportMessages(result.errors) : null;
+const needsAttention = (row: Row) => row.gross_error || row.status === 'failed' || !row.latest_evaluation_id || row.flagged;
 
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      setResult(await api.importGroup(groupId.trim()));
-      onDone();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Импорт не удался');
-    } finally {
-      setBusy(false);
-    }
-  };
+type Note = { text: string; tone?: 'bad' | 'warn' | 'good'; title?: string; action?: string };
 
+function noteFor(row: Row, finished: Finished | undefined): Note | null {
+  if (row.gross_error) return { text: GROSS, tone: 'bad' };
+  if (row.openAppeals > 0) return { text: 'Апелляция ждёт решения' };
+  if (row.status === 'failed') {
+    if (row.reasons.includes(PERSONAL_DATA_FLAG)) return { text: 'Не отправлен: персональные данные', tone: 'warn', title: row.error ?? undefined };
+    const reason = row.error ?? 'причина не указана';
+    const short = reason.length > SHORT_ERROR ? `${reason.slice(0, SHORT_ERROR)}…` : reason;
+    return { text: `Сбой: ${short}`, tone: 'warn', title: reason, action: 'Повторить' };
+  }
+  if (finished) {
+    return { text: finished.ms === null ? FROM_CACHE : `Оценено за ${fmtDuration(finished.ms)}`, tone: 'good' };
+  }
+  if (row.flagged) return { text: 'Есть спорные места' };
+  if (!row.latest_evaluation_id) return { text: 'Не оценён', action: 'Оценить' };
+  return null;
+}
+
+function TotalCell({ row, counted }: { row: Row; counted: boolean }) {
+  const shown = useCountUp(row.latest_total, { fromZero: counted });
+  if (row.latest_total === null) return <span className="drow__total" data-dim>—</span>;
+  return <span className="drow__total">{fmtScore(shown)}</span>;
+}
+
+function RunningCells({ progress }: { progress: Progress }) {
+  const elapsed = useElapsed(progress.startedAt);
+  const { stage } = progress;
+  const known = stage !== null && stage !== 'queued';
+  const label = stage === 'queued' ? 'В очереди' : stageName(stage ?? 'model');
   return (
-    <Modal title="Импорт диалогов" onClose={onClose}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
-      >
-        <Field label="group_id" hint="Значение группы выдают организаторы">
-          <input autoFocus className={inputClass} value={groupId} onChange={(event) => setGroupId(event.target.value)} />
-        </Field>
-        {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
-        {result && (
-          <div className="mt-2 rounded bg-brand-50 p-2">
-            <p>
-              Группа {result.group_id}: загружено {result.imported}, пропущено {result.skipped}.
-            </p>
-          </div>
+    <>
+      <span className="drow__total" data-dim>
+        {known ? (
+          <span className="meter" role="progressbar" aria-label="Ход оценки">
+            <span className="meter__fill" style={{ transform: `scaleX(${STAGE_PROGRESS[stage]})` }} />
+          </span>
+        ) : (
+          fmtClock(elapsed)
         )}
-        {messages && messages.errors.length > 0 && (
-          <div data-testid="import-errors" className="mt-2 rounded bg-red-50 p-2 text-red-800">
-            <p className="font-medium">Ошибки: {messages.errors.length}</p>
-            <ul className="max-h-32 overflow-y-auto">
-              {messages.errors.map((item) => <li key={item}>{item}</li>)}
-            </ul>
-          </div>
-        )}
-        {messages && messages.warnings.length > 0 && (
-          <div data-testid="import-warnings" className="mt-2 rounded bg-amber-50 p-2 text-amber-900">
-            <p className="font-medium">Предупреждения: {messages.warnings.length}</p>
-            <ul className="max-h-32 overflow-y-auto">
-              {messages.warnings.map((item) => <li key={item}>{item}</li>)}
-            </ul>
-          </div>
-        )}
-        <div className="mt-3 flex justify-end gap-2">
-          <Button onClick={onClose}>{result ? 'Закрыть' : 'Отмена'}</Button>
-          <Button variant="primary" type="submit" disabled={busy || !groupId.trim()}>
-            {busy ? 'Импорт…' : 'Импортировать'}
-          </Button>
-        </div>
-      </form>
-    </Modal>
+      </span>
+      <span className="drow__note">
+        <span className="drow-stage">
+          <Spinner />
+          <Swap id={label}>{label}</Swap>
+        </span>
+      </span>
+      <span className="drow__when" data-now>только что</span>
+    </>
   );
 }
 
-function TranscriptDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+type RowProps = {
+  row: Row;
+  progress: Progress | null;
+  finished: Finished | undefined;
+  entering: boolean;
+  onEvaluate: (ids: string[]) => void;
+  tab: Tab;
+};
+
+function DialogRow({ row, progress, finished, entering, onEvaluate, tab }: RowProps) {
   const navigate = useNavigate();
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<TranscriptResult | null>(null);
-
-  const readFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (file) setText(await file.text());
+  const params = tab === 'appeals' && row.appeal ? `?criterion=${encodeURIComponent(row.appeal.criterion_id)}&run=${encodeURIComponent(row.appeal.evaluation_id)}` : '';
+  const href = `/conversations/${encodeURIComponent(row.id)}${params}`;
+  const note = noteFor(row, finished);
+  const act = (event: MouseEvent) => {
+    event.stopPropagation();
+    onEvaluate([row.id]);
   };
-
-  const submit = async () => {
-    setError(null);
-    setResult(null);
-    let record: unknown;
-    try {
-      record = JSON.parse(text);
-    } catch {
-      setError('Текст не является корректным JSON.');
-      return;
-    }
-    setBusy(true);
-    try {
-      setResult(await api.uploadTranscript(record));
-      onDone();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Загрузка не удалась');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal title="Загрузка транскрипта" onClose={onClose}>
-      <div className="space-y-3">
-        <Field label="Файл JSON">
-          <input aria-label="Файл транскрипта" type="file" accept=".json,application/json" onChange={readFile} />
-        </Field>
-        <Field label="Или вставьте JSON одной записи" hint="Поля записи: conversation_id, channel, language, transcript (timestamp, speaker, text)">
-          <textarea
-            aria-label="JSON транскрипта"
-            rows={9}
-            spellCheck={false}
-            className={`${inputClass} font-mono text-xs`}
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-          />
-        </Field>
-        {error && <p role="alert" className="rounded bg-red-50 p-2 text-red-800">{error}</p>}
-        {result && (
-          <div data-testid="upload-result" className="rounded bg-brand-50 p-2">
-            <p>Загружен диалог {result.id}, реплик: {result.turn_count}.</p>
-            {result.warnings.length > 0 && (
-              <ul data-testid="upload-warnings" className="mt-1 text-amber-800">
-                {result.warnings.map((item) => <li key={item}>{item}</li>)}
-              </ul>
-            )}
-          </div>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button onClick={onClose}>{result ? 'Закрыть' : 'Отмена'}</Button>
-          {result ? (
-            <Button variant="primary" onClick={() => navigate(`/conversations/${encodeURIComponent(result.id)}`)}>
-              Открыть карточку
-            </Button>
-          ) : (
-            <Button variant="primary" disabled={busy || !text.trim()} onClick={submit}>
-              {busy ? 'Загрузка…' : 'Загрузить'}
-            </Button>
-          )}
-        </div>
-      </div>
-    </Modal>
+  const cells = (
+    <div
+      className="drow"
+      data-link
+      data-run={progress ? '' : undefined}
+      data-settled={finished && !progress ? '' : undefined}
+      onClick={() => navigate(href)}
+    >
+      <Link className="drow__id" to={href} onClick={(event) => event.stopPropagation()}>{row.id}</Link>
+      <span className="drow__tags">
+        <Tag>{channelLabel(row.channel)}</Tag>
+        <Tag>{row.language}</Tag>
+      </span>
+      {progress ? (
+        <RunningCells progress={progress} />
+      ) : (
+        <>
+          <TotalCell row={row} counted={Boolean(finished)} />
+          <span className="drow__note" data-tone={note?.tone} title={note?.title}>
+            {note && <span>{note.text}</span>}
+            {note?.action && <Button variant="text" onClick={act}>{note.action}</Button>}
+          </span>
+          <span className="drow__when" data-now={finished ? '' : undefined}>
+            {finished ? 'только что' : fmtRelative(row.evaluatedAt)}
+          </span>
+        </>
+      )}
+    </div>
   );
+  return entering ? <div className="row-enter"><div>{cells}</div></div> : cells;
 }
 
-function ExportControls() {
+function recordsIn(text: string): unknown[] {
+  const parsed = JSON.parse(text) as { data?: { records?: unknown[] }; records?: unknown[] } | unknown[];
+  if (Array.isArray(parsed)) return parsed;
+  return parsed.data?.records ?? parsed.records ?? [parsed];
+}
+
+type Upload = { text: string; tone?: 'bad' | 'good' | 'warn' };
+
+function ImportForm({ onDone }: { onDone: (result: ImportResult) => void }) {
   const [groupId, setGroupId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const download = async (format: 'json' | 'csv') => {
-    const filters = { group_id: groupId.trim() || undefined };
+  const submit = async () => {
     setBusy(true);
     setError(null);
     try {
-      if (format === 'json') {
-        host.saveFile('ai-results.json', JSON.stringify(await api.exportResults(filters), null, 2), 'application/json');
-      } else {
-        // The BOM lets Excel read Cyrillic correctly.
-        host.saveFile('ai-results.csv', `\uFEFF${await api.exportCsv(filters)}`, 'text/csv;charset=utf-8');
-      }
+      onDone(await api.importGroup(groupId.trim()));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Экспорт не удался');
+      setError(errorText(reason, 'Импорт не удался'));
     } finally {
       setBusy(false);
     }
   };
-
   return (
-    <div className="flex items-center gap-1" title="Исходные автоматические результаты, без решений по апелляциям">
-      {error && <span role="alert" className="mr-2 text-red-700">{error}</span>}
-      <span className="text-stone-600">Экспорт:</span>
-      <input
-        aria-label="group_id для экспорта"
-        placeholder="group_id"
-        className={`${inputClass} !w-24`}
-        value={groupId}
-        onChange={(event) => setGroupId(event.target.value)}
-      />
-      <Button disabled={busy} onClick={() => download('json')}>JSON</Button>
-      <Button disabled={busy} onClick={() => download('csv')}>CSV</Button>
-    </div>
+    <form
+      className="flex items-center gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+    >
+      <input autoFocus aria-label="group_id" placeholder="group_id" className="field !w-60" value={groupId} onChange={(event) => setGroupId(event.target.value)} />
+      <Button type="submit" variant="primary" disabled={busy || !groupId.trim()}>Импортировать</Button>
+      {error && <span role="alert" className="notice" data-tone="bad">{error}</span>}
+    </form>
   );
 }
 
 export function ConversationsPage() {
-  const { revision } = useJobs();
-  const [channel, setChannel] = useState('');
-  const [language, setLanguage] = useState('');
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [importing, setImporting] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const conversations = useAsync(
-    () => api.listConversations({ channel: channel || undefined, language: language || undefined }),
-    [channel, language, revision],
+  const { jobs, revision, track } = useJobs();
+  const conversations = useAsync(() => api.listConversations(), [revision]);
+  const report = useAsync(() => api.getReport(), [revision]);
+  const openAppeals = useAsync(() => api.listAppeals({ status: 'open' }), [revision]);
+  const [tab, setTab] = useState<Tab>('all');
+  const [search, setSearch] = useState('');
+  const [dragging, setDragging] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [imported, setImported] = useState<ImportResult | null>(null);
+  const [notices, setNotices] = useState<Upload[]>([]);
+  const [fresh, setFresh] = useState<Map<string, number>>(new Map());
+  const [finished, setFinished] = useState<Record<string, Finished>>({});
+  const [runs, setRuns] = useState<Record<string, EvaluationRun>>({});
+  const fileInput = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
+  const reloadList = conversations.reload;
+  const reloadReport = report.reload;
+
+  const hasActive = jobs.some(isActive);
+  useEffect(() => {
+    if (!hasActive) return;
+    const timer = setInterval(reloadList, REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [hasActive, reloadList]);
+
+  // Runs that land while this page is open get the "evaluated in" note and a counted total.
+  const seen = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const ids = jobs.flatMap(({ job }) => job.evaluation_ids);
+    if (!seen.current) seen.current = new Set(ids);
+    for (const id of ids) {
+      if (seen.current.has(id)) continue;
+      seen.current.add(id);
+      api.getEvaluation(id).then(
+        (run) =>
+          setFinished((current) => ({
+            ...current,
+            [run.conversation_id]: { ms: run.log.cache_hit ? null : run.log.latency_ms },
+          })),
+        () => undefined,
+      );
+    }
+  }, [jobs]);
+
+  // Without the new summary fields the status of each dialogue has to be read from its run.
+  const items = useMemo(() => conversations.data ?? [], [conversations.data]);
+  useEffect(() => {
+    for (const item of items) {
+      const id = item.latest_evaluation_id;
+      if (item.latest_status !== undefined || !id || runs[item.id]?.id === id) continue;
+      api.getEvaluation(id).then(
+        (run) => setRuns((current) => ({ ...current, [item.id]: run })),
+        () => undefined,
+      );
+    }
+  }, [items, runs]);
+
+  const appealList = useMemo(() => openAppeals.data ?? [], [openAppeals.data]);
+  const rows = useMemo(() => {
+    const built = items.map((item) => toRow(item, runs[item.id], appealList));
+    const weight = (row: Row) => (fresh.has(row.id) ? 2 : row.evaluatedAt ? 1 : 0);
+    return built.sort(
+      (a, b) => weight(b) - weight(a) || (b.evaluatedAt ?? '').localeCompare(a.evaluatedAt ?? '') || a.id.localeCompare(b.id),
+    );
+  }, [items, runs, appealList, fresh]);
+
+  const needle = search.trim().toLowerCase();
+  const attention = rows.filter(needsAttention);
+  const withAppeals = rows.filter((row) => row.openAppeals > 0);
+  const shown = (tab === 'attention' ? attention : tab === 'appeals' ? withAppeals : rows).filter(
+    (row) => !needle || row.id.toLowerCase().includes(needle),
   );
 
-  // Filter options come from the data: control sets may bring new channels or languages.
-  const known = useRef({ channels: new Set<string>(), languages: new Set<string>() });
+  const totals = rows.flatMap((row) => (row.latest_total === null ? [] : [row.latest_total]));
+  const average = totals.length ? totals.reduce((sum, value) => sum + value, 0) / totals.length : null;
+  const grossCount = rows.filter((row) => row.gross_error).length;
+  const failedJobs = jobs.filter(({ job, pollError }) => pollError || (job.status === 'failed' && !job.evaluation_ids.length));
+
+  const evaluate = useCallback(
+    async (ids: string[]) => {
+      if (!ids.length) return;
+      try {
+        track(await api.createEvaluation({ conversation_ids: ids }), ids);
+      } catch (reason) {
+        setNotices((current) => [...current, { text: errorText(reason, 'Не удалось запустить оценку'), tone: 'bad' }]);
+      }
+    },
+    [track],
+  );
+
+  const uploadFiles = useCallback(
+    async (files: File[]) => {
+      const added: string[] = [];
+      const messages: Upload[] = [];
+      for (const file of files) {
+        try {
+          for (const record of recordsIn(await file.text())) {
+            const result = await api.uploadTranscript(record);
+            added.push(result.id);
+            messages.push(...result.warnings.map((text) => ({ text })));
+          }
+        } catch (reason) {
+          const text = reason instanceof SyntaxError ? 'файл не является корректным JSON' : errorText(reason, 'загрузка не удалась');
+          messages.push({ text: `${file.name}: ${text}`, tone: 'bad' });
+        }
+      }
+      setNotices(messages);
+      if (!added.length) return;
+      setTab('all');
+      setSearch('');
+      setFresh((current) => new Map([...current, ...added.map((id): [string, number] => [id, Date.now()])]));
+      reloadList();
+      reloadReport();
+      await evaluate(added);
+    },
+    [evaluate, reloadList, reloadReport],
+  );
+
+  // The whole page takes a file, so the listeners sit on the window.
   useEffect(() => {
-    for (const item of conversations.data ?? []) {
-      known.current.channels.add(item.channel);
-      known.current.languages.add(item.language);
+    const hasFiles = (event: DragEvent) => Boolean(event.dataTransfer?.types.includes('Files'));
+    const onEnter = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      dragDepth.current += 1;
+      setDragging(true);
+    };
+    const onOver = (event: DragEvent) => {
+      if (hasFiles(event)) event.preventDefault();
+    };
+    const onLeave = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      dragDepth.current -= 1;
+      if (dragDepth.current <= 0) setDragging(false);
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      dragDepth.current = 0;
+      setDragging(false);
+      uploadFiles([...(event.dataTransfer?.files ?? [])]);
+    };
+    window.addEventListener('dragenter', onEnter);
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragenter', onEnter);
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [uploadFiles]);
+
+  const download = async (format: 'json' | 'csv') => {
+    try {
+      if (format === 'json') {
+        host.saveFile('ai-results.json', JSON.stringify(await api.exportResults(), null, 2), 'application/json');
+      } else {
+        // The BOM lets Excel read Cyrillic correctly.
+        host.saveFile('ai-results.csv', `﻿${await api.exportCsv()}`, 'text/csv;charset=utf-8');
+      }
+    } catch (reason) {
+      setNotices([{ text: errorText(reason, 'Экспорт не удался'), tone: 'bad' }]);
     }
-  }, [conversations.data]);
+  };
 
-  const items = useMemo(() => conversations.data ?? [], [conversations.data]);
-  const selectedItems = items.filter((item) => selected.has(item.id));
-  const allSelected = items.length > 0 && selectedItems.length === items.length;
-  const channels = [...new Set(selectedItems.map((item) => item.channel))];
-  const hasFilter = Boolean(channel || language);
-
-  const toggle = (id: string) =>
-    setSelected((current) => {
-      const next = new Set(current);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
+  const importMessages = imported ? splitImportMessages(imported.errors) : null;
+  const notEvaluated = rows.filter((row) => !row.latest_evaluation_id && !progressFor(jobs, row.id)).map((row) => row.id);
+  const navigate = useNavigate();
 
   return (
-    <div className="mx-auto max-w-[1400px] p-4">
-      <div className="mb-3 flex items-center gap-3">
-        <h1 className="text-base font-semibold">Диалоги</h1>
-        <select aria-label="Канал" className={`${inputClass} !w-36`} value={channel} onChange={(event) => setChannel(event.target.value)}>
-          <option value="">Все каналы</option>
-          {[...new Set([...known.current.channels, ...items.map((item) => item.channel)])].map((value) => (
-            <option key={value} value={value}>{channelLabel(value)}</option>
-          ))}
-        </select>
-        <select aria-label="Язык" className={`${inputClass} !w-32`} value={language} onChange={(event) => setLanguage(event.target.value)}>
-          <option value="">Все языки</option>
-          {[...new Set([...known.current.languages, ...items.map((item) => item.language)])].map((value) => (
-            <option key={value} value={value}>{value}</option>
-          ))}
-        </select>
-        <div className="ml-auto"><ExportControls /></div>
-        <Button onClick={() => setUploading(true)}>Загрузить транскрипт</Button>
-        <Button onClick={() => setImporting(true)}>Импорт по group_id</Button>
-      </div>
+    <>
+      <Panel className="head-row">
+        <h1 className="title">Диалоги</h1>
+        <div className="stats">
+          <span className="stat"><b>{report.data?.evaluated ?? '—'}</b> из {report.data?.conversations ?? '—'} оценено</span>
+          <span className="stat"><b>{fmtNumber(average, 1)}</b> средний итог</span>
+          <span className="stat"><b data-tone="bad">{grossCount}</b> грубых нарушений</span>
+        </div>
+        <div className="head-row__end">
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".json,application/json"
+            multiple
+            hidden
+            aria-label="Файлы диалогов"
+            onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              event.target.value = '';
+              uploadFiles(files);
+            }}
+          />
+          <Button variant="primary" size="large" onClick={() => fileInput.current?.click()}>Загрузить диалог</Button>
+          <Menu
+            trigger={({ open, toggle }) => (
+              <Button variant="icon" aria-label="Ещё" aria-expanded={open} onClick={toggle}>
+                <MoreHorizontal size={16} strokeWidth={1.75} />
+              </Button>
+            )}
+          >
+            {(close) => (
+              <>
+                <button type="button" className="menu__item" onClick={() => { close(); setShowImport(true); }}>Импорт по group_id</button>
+                <button type="button" className="menu__item" onClick={() => { close(); download('json'); }}>Экспорт JSON</button>
+                <button type="button" className="menu__item" onClick={() => { close(); download('csv'); }}>Экспорт CSV</button>
+                <button type="button" className="menu__item" onClick={() => { close(); navigate('/report'); }}>Подробный отчёт</button>
+              </>
+            )}
+          </Menu>
+        </div>
+      </Panel>
 
-      <div className="mb-2 flex min-h-9 items-center gap-3 rounded border border-line bg-white px-3 py-1">
-        <span className="text-stone-600">Выбрано: {selectedItems.length}</span>
-        <RunEvaluation
-          conversationIds={selectedItems.map((item) => item.id)}
-          channels={channels}
-          buttonLabel="Запустить оценку"
+      {(showImport || imported) && (
+        <Panel className="flex flex-col gap-2 !py-4">
+          {showImport && (
+            <ImportForm
+              onDone={(result) => {
+                setImported(result);
+                setShowImport(false);
+                reloadList();
+                reloadReport();
+              }}
+            />
+          )}
+          {imported && (
+            <>
+              <div className="flex items-center gap-4">
+                <span className="notice" data-tone="good" role="status">Импортировано {imported.imported}, пропущено {imported.skipped}</span>
+                {notEvaluated.length > 0 && <Button variant="text" onClick={() => evaluate(notEvaluated)}>Оценить неоценённые</Button>}
+                <Button variant="text" className="ml-auto" onClick={() => setImported(null)}>Скрыть</Button>
+              </div>
+              {importMessages?.errors.map((item) => <p key={item} className="notice" data-tone="bad">{item}</p>)}
+              {importMessages?.warnings.map((item) => <p key={item} className="notice">{item}</p>)}
+            </>
+          )}
+        </Panel>
+      )}
+
+      {(notices.length > 0 || failedJobs.length > 0) && (
+        <div className="flex flex-col gap-1 px-2">
+          {notices.map((item, position) => <p key={position} className="notice" data-tone={item.tone}>{item.text}</p>)}
+          {failedJobs.map(({ job, pollError }) => (
+            <p key={job.id} className="notice" data-tone="warn">
+              {pollError ? `Связь с оценкой потеряна: ${pollError}` : `Сбой: ${job.errors.join('; ') || 'оценка прервана'}`}
+            </p>
+          ))}
+        </div>
+      )}
+
+      <div className="tabs-row">
+        <div role="tablist" className="flex gap-5">
+          {(
+            [
+              ['all', 'Все', rows.length],
+              ['attention', 'Требуют внимания', attention.length],
+              ['appeals', 'Апелляции', withAppeals.length],
+            ] as const
+          ).map(([id, label, count]) => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id} className="tab" onClick={() => setTab(id)}>
+              {label} {count}
+            </button>
+          ))}
+        </div>
+        <input
+          aria-label="Поиск по номеру диалога"
+          placeholder="Поиск по номеру"
+          className="field tabs-row__search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
         />
       </div>
 
-      <div className="overflow-hidden rounded border border-line bg-white">
-        {conversations.error ? (
-          <ErrorState message={conversations.error} onRetry={conversations.reload} />
-        ) : conversations.loading && !conversations.data ? (
-          <LoadingState label="Загружаем диалоги…" />
-        ) : !items.length ? (
-          <EmptyState title={hasFilter ? 'Под фильтры ничего не подходит' : 'Диалогов пока нет'}>
-            {hasFilter ? 'Измените канал или язык.' : 'Загрузите их кнопкой импорта по group_id.'}
-          </EmptyState>
-        ) : (
-          <table className="w-full">
-            <thead className="border-b border-line bg-stone-50 text-left text-xs text-stone-600">
-              <tr>
-                <th className="w-9 px-3 py-1.5">
-                  <input
-                    type="checkbox"
-                    aria-label="Выбрать все"
-                    checked={allSelected}
-                    onChange={() => setSelected(allSelected ? new Set() : new Set(items.map((item) => item.id)))}
-                  />
-                </th>
-                <th className="px-2 py-1.5 font-medium">Диалог</th>
-                <th className="px-2 py-1.5 font-medium">Канал</th>
-                <th className="px-2 py-1.5 font-medium">Язык</th>
-                <th className="px-2 py-1.5 text-right font-medium">Реплик</th>
-                <th className="px-2 py-1.5 font-medium">Группа</th>
-                <th className="px-2 py-1.5 text-right font-medium">Итог</th>
-                <th className="px-2 py-1.5 font-medium">Грубая ошибка</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.id} className="border-b border-stone-100 last:border-0 hover:bg-brand-50/50">
-                  <td className="px-3 py-1.5">
-                    <input
-                      type="checkbox"
-                      aria-label={`Выбрать ${item.id}`}
-                      checked={selected.has(item.id)}
-                      onChange={() => toggle(item.id)}
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Link className="font-medium text-brand-700 hover:underline" to={`/conversations/${encodeURIComponent(item.id)}`}>
-                      {item.id}
-                    </Link>
-                  </td>
-                  <td className="px-2 py-1.5">{channelLabel(item.channel)}</td>
-                  <td className="px-2 py-1.5">{item.language}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums">{item.turn_count}</td>
-                  <td className="px-2 py-1.5 text-stone-500">{item.group_id ?? '—'}</td>
-                  <td className="px-2 py-1.5 text-right"><TotalCell item={item} /></td>
-                  <td className="px-2 py-1.5">{item.gross_error && <Badge tone="bad">Грубая ошибка</Badge>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {importing && (
-        <ImportDialog onClose={() => setImporting(false)} onDone={conversations.reload} />
-      )}
-      {uploading && <TranscriptDialog onClose={() => setUploading(false)} onDone={conversations.reload} />}
-    </div>
+      <Panel className="dialogs" data-over={dragging || undefined}>
+        <div className="drow drow--head">
+          <span>Диалог</span>
+          <span>Канал</span>
+          <span className="flex justify-end">Итог</span>
+          <span>Отметка</span>
+          <span className="justify-self-end">Когда</span>
+        </div>
+        <div className="dialogs__scroll">
+          {conversations.error ? (
+            <ErrorState message={conversations.error} onRetry={reloadList} />
+          ) : !conversations.data ? (
+            <LoadingState label="Загружаем диалоги…" />
+          ) : !shown.length ? (
+            <EmptyState title={rows.length ? 'Здесь ничего нет' : 'Диалогов пока нет'}>
+              {!rows.length && 'Перетащите файл .json сюда или импортируйте группу через меню.'}
+            </EmptyState>
+          ) : (
+            shown.map((row) => (
+              <DialogRow
+                key={row.id}
+                row={row}
+                tab={tab}
+                progress={progressFor(jobs, row.id)}
+                finished={finished[row.id]}
+                entering={Date.now() - (fresh.get(row.id) ?? 0) < ENTER_MS}
+                onEvaluate={evaluate}
+              />
+            ))
+          )}
+        </div>
+      </Panel>
+    </>
   );
 }

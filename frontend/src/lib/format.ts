@@ -1,41 +1,72 @@
 import type { Answer, ChecklistVersion, Criterion, EvaluationRun, EvaluationSummary, ResultStatus } from '../api/types';
+import { CHANNELS, LANGUAGES, NOT_APPLICABLE } from './labels';
 
-export const fmtNumber = (value: number | null | undefined) =>
-  value === null || value === undefined ? '—' : value.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+const THIN_SPACE = ' ';
+const group = (text: string) => text.replace(/[  ]/g, THIN_SPACE);
+
+export const fmtNumber = (value: number | null | undefined, digits = 2) =>
+  value === null || value === undefined ? '—' : group(value.toLocaleString('ru-RU', { maximumFractionDigits: digits }));
+
+/** Totals and points: always two digits, a decimal comma. */
+export const fmtScore = (value: number | null | undefined) =>
+  value === null || value === undefined
+    ? '—'
+    : group(value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+export function fmtDuration(ms: number): string {
+  if (ms >= 60_000) {
+    const seconds = Math.round(ms / 1000);
+    const rest = seconds % 60;
+    return `${Math.floor(seconds / 60)} мин${rest ? ` ${rest} с` : ''}`;
+  }
+  const seconds = ms / 1000;
+  return `${fmtNumber(seconds, seconds < 0.1 ? 2 : 1)} с`;
+}
+
+export const fmtClock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+const time = (date: Date) => date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
 export const fmtDate = (value: string) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    : `${date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} в ${time(date)}`;
 };
 
-// Chats carry MM:SS, calls carry ISO in UTC. The raw value stays in the title attribute.
-export const fmtTimestamp = (value: string) => {
-  const match = value.match(/T(\d{2}:\d{2}:\d{2})/);
-  return match ? match[1] : value;
-};
-
-export const speakerLabel = (speaker: string) =>
-  ({ operator: 'Оператор', client: 'Клиент', bot: 'Бот', system: 'Система' })[speaker] ?? speaker;
-
-export const channelLabel = (channel: string) =>
-  ({ 'agent chat': 'Чат', 'voice call': 'Звонок' })[channel] ?? channel;
-
-export const statusLabel = (status: ResultStatus) =>
-  ({ assessed: 'Оценено', not_applicable: 'N/A', unassessable: 'Нельзя оценить', failed: 'Сбой оценки' })[status];
-
-export function answerLabel(criterion: Criterion | undefined, status: ResultStatus, answer: Answer): string {
-  if (status !== 'assessed') return statusLabel(status);
-  if (answer === 'yes') return criterion?.flag ? 'Да, нарушение' : 'Да';
-  if (answer === 'no') return criterion?.flag ? 'Нет нарушения' : 'Нет';
-  if (typeof answer === 'number' && criterion) {
-    return `${answer} из ${Math.max(...criterion.levels.map((level) => level.value))}`;
-  }
-  return String(answer ?? '—');
+export function fmtRelative(value: string | null | undefined): string {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const minutes = Math.floor((Date.now() - date.getTime()) / 60_000);
+  if (minutes < 1) return 'только что';
+  if (minutes < 60) return `${minutes} мин`;
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === new Date().toDateString()) return `сегодня в ${time(date)}`;
+  if (date.toDateString() === yesterday.toDateString()) return `вчера в ${time(date)}`;
+  return fmtDate(value);
 }
 
-export type Tone = 'neutral' | 'good' | 'warn' | 'bad' | 'muted';
+export const channelLabel = (channel: string) => CHANNELS[channel]?.one ?? channel;
+export const channelsLabel = (channel: string) => CHANNELS[channel]?.many ?? channel;
+export const languageLabel = (language: string) => LANGUAGES[language.toUpperCase()] ?? language;
+
+export const maxLevel = (criterion: Criterion) => Math.max(...criterion.levels.map((level) => level.value));
+
+export type Tone = 'good' | 'bad' | 'warn' | 'scale' | 'muted';
+
+/** Text of a badge. For a flag the polarity is reversed: "yes" means a violation. */
+export function answerText(criterion: Criterion | undefined, status: ResultStatus, answer: Answer): string {
+  if (status === 'not_applicable') return NOT_APPLICABLE;
+  if (status === 'unassessable') return 'Нельзя оценить';
+  if (status === 'failed') return 'Сбой';
+  if (criterion?.flag) return answer === 'yes' ? 'Выявлено' : 'Не выявлены';
+  if (answer === 'yes') return 'Да';
+  if (answer === 'no') return 'Нет';
+  if (typeof answer === 'number' && criterion?.levels.length) return `${answer} из ${maxLevel(criterion)}`;
+  return String(answer ?? '—');
+}
 
 export function answerTone(criterion: Criterion | undefined, status: ResultStatus, answer: Answer): Tone {
   if (status === 'not_applicable') return 'muted';
@@ -43,25 +74,37 @@ export function answerTone(criterion: Criterion | undefined, status: ResultStatu
   if (criterion?.flag) return answer === 'yes' ? 'bad' : 'good';
   if (answer === 'yes') return 'good';
   if (answer === 'no') return 'bad';
-  if (typeof answer === 'number' && criterion) {
-    const top = Math.max(...criterion.levels.map((level) => level.value));
-    return answer === top ? 'good' : answer === 0 ? 'bad' : 'warn';
-  }
-  return 'neutral';
+  return 'scale';
 }
 
-const reasonLabels: Record<string, string> = {
-  mock_provider: 'Провайдер-заглушка: реальная модель не вызывалась',
-  borderline_scale: 'Граница ступеней шкалы',
-  channel_not_in_checklist: 'Чек-лист не рассчитан на канал этого диалога',
+export const answerKindLabel = (criterion: Criterion) => {
+  if (criterion.flag || !criterion.scored) return 'отметка, без баллов';
+  if (criterion.type === 'scale') {
+    const values = criterion.levels.map((level) => level.value);
+    return values.length ? `шкала ${Math.min(...values)}–${Math.max(...values)}` : 'шкала';
+  }
+  return criterion.allow_na ? 'Да / Нет / не применимо' : 'Да / Нет';
 };
-export const reasonLabel = (reason: string) => reasonLabels[reason] ?? reason;
+
+const FLAG_TEXT: Record<string, string> = {
+  borderline_scale: 'Граница ступеней шкалы',
+  ambiguous_rule: 'Спорное правило',
+  channel_not_in_checklist: 'Оценочный лист не рассчитан на канал этого диалога',
+  partial_result: 'Оценены не все критерии',
+};
+
+/** Snake_case tokens are technical unless the dictionary names them; plain phrases are shown. */
+export function flagText(flag: string): string | null {
+  const reason = flag.replace(/^[a-z0-9_-]+:/, ''); // run-level reasons carry the criterion id
+  return FLAG_TEXT[reason] ?? (/^[a-z0-9_]+$/.test(reason) ? null : reason);
+}
+
+export const visibleFlags = (flags: string[]) => [
+  ...new Set(flags.map(flagText).filter((text): text is string => Boolean(text))),
+];
 
 export const STUB_FLAG = 'mock_provider';
-
-// These have their own place on the card: a stub banner, a failure banner, a decision block.
-const SEPARATELY_SHOWN = new Set([STUB_FLAG, 'evaluation_failed', 'manual_decision']);
-export const reviewNotes = (items: string[]) => items.filter((item) => !SEPARATELY_SHOWN.has(item));
+export const PERSONAL_DATA_FLAG = 'personal_data_not_sent';
 
 /** The backend mixes warnings into ImportResult.errors with a `warning:` prefix. */
 export function splitImportMessages(items: string[]): { warnings: string[]; errors: string[] } {
@@ -78,20 +121,21 @@ export const isStubRun = (run: EvaluationRun) =>
   run.log.attempts.some((attempt) => attempt.provider === 'mock');
 
 export const criterionTitle = (checklist: ChecklistVersion | null, id: string) =>
-  checklist?.criteria.find((criterion) => criterion.id === id)?.title ?? id;
+  checklist?.criteria.find((criterion) => criterion.id === id)?.title ?? 'Критерий';
 
-/** Answer without its criterion, for the run comparison where only raw values are known. */
+/** Answer without its criterion, for the comparison where only raw values are known. */
 export function plainAnswer(status: ResultStatus, answer: Answer): string {
-  if (status !== 'assessed') return statusLabel(status);
+  if (status === 'not_applicable') return NOT_APPLICABLE;
+  if (status === 'unassessable') return 'Нельзя оценить';
+  if (status === 'failed') return 'Сбой';
   return answer === 'yes' ? 'Да' : answer === 'no' ? 'Нет' : String(answer ?? '—');
 }
 
 export const runLabel = (run: EvaluationSummary) =>
   [
-    run.status === 'failed' ? 'Сбой' : `Итог ${fmtNumber(run.final_total)}`,
-    run.checklist_id ? `v${run.checklist_version}` : 'без чек-листа',
+    run.status === 'failed' ? 'Сбой' : `Итог ${fmtScore(run.final_total)}`,
+    run.checklist_id ? `версия ${run.checklist_version}` : 'без оценочного листа',
     fmtDate(run.created_at),
-    run.checklist_id,
-  ]
-    .filter(Boolean)
-    .join(', ');
+  ].join(', ');
+
+export const errorText = (reason: unknown, fallback: string) => (reason instanceof Error ? reason.message : fallback);
