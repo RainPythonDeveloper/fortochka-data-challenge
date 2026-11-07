@@ -30,8 +30,12 @@ export function useCountUp(target: number | null, { delay = 0, fromZero = false,
     const timer = setTimeout(() => {
       frame = requestAnimationFrame(tick);
     }, delay);
+    // A background tab or a hidden pane runs no animation frames: the exact value
+    // still lands once the animation would have ended, so a stale number never stays.
+    const settle = setTimeout(() => setShown(target), delay + duration + 50);
     return () => {
       clearTimeout(timer);
+      clearTimeout(settle);
       cancelAnimationFrame(frame);
       setShown(target);
     };
