@@ -19,11 +19,21 @@ export function fmtDuration(ms: number): string {
     const rest = seconds % 60;
     return `${Math.floor(seconds / 60)} мин${rest ? ` ${rest} с` : ''}`;
   }
+  if (ms > 0 && ms < 10) return `< ${fmtNumber(0.01)} с`; // would round to a misleading zero
   const seconds = ms / 1000;
   return `${fmtNumber(seconds, seconds < 0.1 ? 2 : 1)} с`;
 }
 
 export const fmtClock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+/** Russian plural: 1 сбой, 2 сбоя, 5 сбоев. */
+export function plural(count: number, one: string, few: string, many: string): string {
+  const tens = count % 100;
+  const units = count % 10;
+  if (tens >= 11 && tens <= 14) return many;
+  if (units === 1) return one;
+  return units >= 2 && units <= 4 ? few : many;
+}
 
 const time = (date: Date) => date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
