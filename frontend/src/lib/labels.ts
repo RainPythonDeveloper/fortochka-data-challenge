@@ -12,6 +12,7 @@ export const stageName = (id: StageId) => STAGES.find((stage) => stage.id === id
 
 export const NAV = [
   { to: '/conversations', label: 'Диалоги' },
+  { to: '/appeals', label: 'Апелляции' },
   { to: '/sheet', label: 'Оценочный лист' },
 ];
 

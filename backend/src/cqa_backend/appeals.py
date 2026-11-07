@@ -18,6 +18,23 @@ DECISION_FLAG = "manual_decision"
 
 def _appeal(row: sqlite3.Row) -> Appeal:
     decision = json.loads(row["decision_json"]) if row["decision_json"] else None
+    extra: dict = {}
+    keys = row.keys()
+    if "conversation_id" in keys and row["conversation_id"]:
+        extra["conversation_id"] = row["conversation_id"]
+        checklist = json.loads(row["checklist_json"] or "{}")
+        criterion = next(
+            (c for c in checklist.get("criteria", []) if c.get("id") == row["criterion_id"]), None
+        )
+        extra["criterion_title"] = criterion.get("title") if criterion else None
+        # The model's own answer: results_json is never changed by a decision.
+        original = next(
+            (r for r in json.loads(row["results_json"] or "[]") if r.get("criterion_id") == row["criterion_id"]),
+            None,
+        )
+        if original:
+            extra["model_status"] = original.get("status")
+            extra["model_answer"] = original.get("answer")
     return Appeal(
         id=row["id"],
         evaluation_id=row["evaluation_id"],
@@ -26,6 +43,7 @@ def _appeal(row: sqlite3.Row) -> Appeal:
         status=row["status"],
         created_at=row["created_at"],
         decision=decision,
+        **extra,
     )
 
 
@@ -54,12 +72,14 @@ def create_appeal(db: Database, body: AppealCreate) -> Appeal:
 def list_appeals(
     db: Database, status: str | None = None, evaluation_id: str | None = None
 ) -> list[Appeal]:
-    filters = {"status": status, "evaluation_id": evaluation_id}
+    filters = {"a.status": status, "a.evaluation_id": evaluation_id}
     used = {key: value for key, value in filters.items() if value}
     clause = f"WHERE {' AND '.join(f'{key} = ?' for key in used)}" if used else ""
     with db.read() as conn:
         rows = conn.execute(
-            f"SELECT * FROM appeals {clause} ORDER BY rowid DESC", list(used.values())
+            "SELECT a.*, r.conversation_id, r.checklist_json, r.results_json FROM appeals a "
+            f"LEFT JOIN evaluation_runs r ON r.id = a.evaluation_id {clause} ORDER BY a.rowid DESC",
+            list(used.values()),
         ).fetchall()
     return [_appeal(row) for row in rows]
 

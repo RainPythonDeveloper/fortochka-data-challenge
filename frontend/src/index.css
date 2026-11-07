@@ -2720,3 +2720,32 @@ mark.quote {
     width: 100%;
   }
 }
+
+/* Reviewer's appeals queue */
+.appeals-scroll {
+  overflow-x: auto;
+}
+.appeals-table__text {
+  max-width: 320px;
+  white-space: normal;
+}
+.appeal-link {
+  color: var(--color-green-text, #1f6b43);
+  font-weight: 600;
+  text-decoration: underline;
+}
+.appeal-state {
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.appeal-state[data-state='open'] {
+  background: var(--color-amber-bg, #fff4d6);
+  color: var(--color-amber-text);
+}
+.appeal-state[data-state='decided'] {
+  background: var(--color-green-bg, #e6f4ea);
+  color: var(--color-green-text, #1f6b43);
+}

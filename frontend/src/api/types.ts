@@ -352,4 +352,9 @@ export type Appeal = {
   status: 'open' | 'decided';
   created_at: string;
   decision: (DecisionCreate & { decided_at: string }) | null;
+  /** Reviewer context, present in lists. */
+  conversation_id?: string | null;
+  criterion_title?: string | null;
+  model_status?: string | null;
+  model_answer?: Answer;
 };

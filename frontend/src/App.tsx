@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppBar } from './components/AppBar';
 import { JobsProvider } from './lib/jobs';
 import { ConversationsPage } from './pages/ConversationsPage';
+import { AppealsPage } from './pages/AppealsPage';
 import { ReportPage } from './pages/ReportPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { SheetPage } from './pages/SheetPage';
@@ -16,6 +17,7 @@ export default function App() {
             <Route path="/" element={<Navigate to="/conversations" replace />} />
             <Route path="/conversations" element={<ConversationsPage />} />
             <Route path="/conversations/:id" element={<ReviewPage />} />
+            <Route path="/appeals" element={<AppealsPage />} />
             <Route path="/sheet" element={<SheetPage />} />
             <Route path="/checklists" element={<Navigate to="/sheet" replace />} />
             <Route path="/report" element={<ReportPage />} />

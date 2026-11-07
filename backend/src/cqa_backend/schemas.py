@@ -171,6 +171,11 @@ class Appeal(BaseModel):
     status: Literal["open", "decided"]
     created_at: str
     decision: Decision | None = None
+    # Context for the reviewer's list; filled when listing, optional elsewhere.
+    conversation_id: str | None = None
+    criterion_title: str | None = None
+    model_status: str | None = None
+    model_answer: str | int | None = None
 
 
 class ReportBucket(BaseModel):

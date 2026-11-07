@@ -164,3 +164,12 @@ def test_appeals_filter_by_evaluation_and_status(make_client):
     assert ids(f"evaluation_id={second}") == {other["id"]}
     assert ids(f"evaluation_id={first}&status=open") == {one["id"]}
     assert ids("evaluation_id=none") == set()
+
+
+def test_the_list_carries_context_for_the_reviewer(scored):
+    client, evaluation_id = scored
+    appeal(client, evaluation_id)
+    item = client.get("/appeals").json()[0]
+    assert item["conversation_id"] == "syn-001"
+    assert item["criterion_title"] == "Установление контакта"
+    assert item["model_status"] == "assessed" and item["model_answer"] == "no"
