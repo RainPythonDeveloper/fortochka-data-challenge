@@ -62,6 +62,41 @@ def test_a_note_written_in_the_ui_comes_last_and_can_override(checklist):
     assert len(effective_notes(criterion)) == 3
 
 
+def test_a_switched_off_default_note_does_not_reach_the_prompt(checklist):
+    original = checklist.criteria[6]
+    switched_off = original.team_notes[0]
+    edited = checklist.model_copy(deep=True)
+    criterion = edited.criteria[6]
+    # Moved out of team_notes, as the UI does. A default note alone would come back.
+    criterion.team_notes = criterion.team_notes[1:]
+    assert switched_off in effective_notes(criterion)
+
+    criterion.disabled_notes = [switched_off]
+    assert switched_off not in effective_notes(criterion)
+    assert switched_off not in render_rubric(edited)
+    assert switched_off in render_rubric(checklist)
+    assert original.team_notes[1] in render_rubric(edited)
+
+
+def test_a_note_written_in_the_ui_can_be_switched_off_too(checklist):
+    criterion = checklist.criteria[6].model_copy(deep=True)
+    criterion.team_notes = [*criterion.team_notes, "Простое прощание считать достаточным."]
+    criterion.disabled_notes = ["Простое прощание считать достаточным."]
+    assert "Простое прощание считать достаточным." not in effective_notes(criterion)
+
+
+def test_disabled_notes_change_the_hash_only_when_they_are_set(checklist):
+    edited = checklist.model_copy(deep=True)
+    assert checklist_hash(edited) == checklist_hash(checklist)
+    payload = checklist.model_dump(mode="json")
+    for item in payload["criteria"]:
+        del item["disabled_notes"]
+    assert checklist_hash(type(checklist).model_validate(payload)) == checklist_hash(checklist)
+
+    edited.criteria[6].disabled_notes = [edited.criteria[6].team_notes[0]]
+    assert checklist_hash(edited) != checklist_hash(checklist)
+
+
 def test_changing_only_a_weight_keeps_the_prompt(checklist, chat):
     reweighted = checklist.model_copy(deep=True)
     reweighted.criteria[0].weight = 40

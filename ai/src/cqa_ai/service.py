@@ -72,6 +72,9 @@ def checklist_hash(checklist: ChecklistVersion) -> str:
     payload = checklist.model_dump(mode="json", exclude={"version"})
     for criterion in payload["criteria"]:
         criterion.pop("weight", None)
+        # Empty means nothing is switched off: versions saved before the field keep their hash.
+        if not criterion.get("disabled_notes"):
+            criterion.pop("disabled_notes", None)
     return _digest(payload)
 
 

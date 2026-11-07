@@ -78,6 +78,7 @@ class Criterion(BaseModel):
     na_when: str | None = None
     levels: list[ScaleLevel] = Field(default_factory=list)
     team_notes: list[str] = Field(default_factory=list)
+    disabled_notes: list[str] = Field(default_factory=list)  # switched off, including defaults
 
     @model_validator(mode="after")
     def check_shape(self) -> Criterion:
