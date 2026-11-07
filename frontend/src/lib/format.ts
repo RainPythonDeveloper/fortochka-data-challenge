@@ -124,7 +124,8 @@ export function ruleText(rule: string | null | undefined): string | null {
   if (level) return `Ступень шкалы ${level[1]}`;
   const note = /^note:(\d+)$/.exec(rule);
   if (note) return `Уточнение команды № ${note[1]}`;
-  return rule;
+  // Anything else is a malformed reference from the model: better hidden than shown raw.
+  return null;
 }
 
 /** Snake_case tokens are technical unless the dictionary names them; plain phrases are shown. */
