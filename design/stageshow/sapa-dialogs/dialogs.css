@@ -1,0 +1,296 @@
+/* The dialogue list. Shares sapa.css for the bar, ground, panels and type. */
+
+/* One wide window, inset top and sides, running off the bottom */
+.spd .sp-win.spd-win {
+  height: 760px;
+}
+
+/* The desktop: the transcript file waiting to be dragged in */
+.spd-desk {
+  position: absolute;
+  left: 40px;
+  top: 236px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  width: 104px;
+  font-size: 12px;
+  transition: opacity 0.2s ease;
+}
+
+.spd-desk[data-lifted] {
+  opacity: 0.45;
+}
+
+.spd-desk__name {
+  padding: 1px 5px;
+  color: var(--ss-text-strong);
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+/* A page with a folded corner and a green JSON band */
+.spd-json {
+  position: relative;
+  display: block;
+  width: 44px;
+  height: 56px;
+  border-radius: 3px;
+  background: #ffffff;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.16), 0 2px 6px -2px rgba(0, 0, 0, 0.22);
+  clip-path: polygon(0 0, 70% 0, 100% 23%, 100% 100%, 0 100%);
+}
+
+.spd-json::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 30%;
+  height: 23%;
+  background: linear-gradient(225deg, transparent 50%, #e4e4e7 50%);
+}
+
+.spd-json__band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  min-height: 13px;
+  padding: 2px 0;
+  background: #00873a;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 13px;
+  text-align: center;
+}
+
+.spd-json[data-small] {
+  flex-shrink: 0;
+  width: 14px;
+  height: 18px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px #c9cfd6;
+  clip-path: none;
+}
+
+.spd-json[data-small]::before {
+  display: none;
+}
+
+.spd-json[data-small] .spd-json__band {
+  bottom: 4px;
+  height: 5px;
+  padding: 0;
+}
+
+/* The drag image: the icon and its name, carried with the arrow */
+.spd-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 30;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+}
+
+.spd-drag[data-show] {
+  opacity: 0.88;
+}
+
+.spd-drag__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  width: 104px;
+  font-size: 12px;
+  will-change: transform;
+}
+
+.spd-drag__name {
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--ss-accent-text);
+  color: #ffffff;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.spd-drag[data-dropped] {
+  opacity: 0;
+  transition: opacity 0.22s ease-in;
+}
+
+.spd-drag[data-dropped] .spd-drag__inner {
+  transform: scale(0.5);
+  transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Head: the title and three figures in one line */
+.spd-head {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 28px;
+  padding: 22px 24px;
+}
+
+.spd-head .sp-title {
+  margin-right: 12px;
+}
+
+.spd-stat {
+  color: var(--ss-text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.spd-stat b {
+  margin-right: 5px;
+  color: var(--ss-text-strong);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.spd-stat b.spd-red {
+  color: var(--ss-danger-text);
+}
+
+/* The list, which lights up while a file is carried over it */
+.spd-list {
+  padding: 8px 22px 20px;
+  transition: box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.spd-list[data-over] {
+  background: #f7fcf9;
+  box-shadow: inset 0 0 0 2px var(--ss-success);
+}
+
+.spd-row {
+  display: grid;
+  grid-template-columns: 150px 140px 90px 300px minmax(0, 1fr);
+  align-items: center;
+  gap: 20px;
+  height: 52px;
+  margin: 0 -12px;
+  padding: 0 12px;
+  border-top: 1px solid var(--ss-line-faint);
+  border-radius: 0;
+  color: var(--ss-text-strong);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.spd-row--head {
+  height: 40px;
+  border-top: 0;
+  color: var(--ss-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.spd-num {
+  display: flex;
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+.spd-id {
+  font-weight: 600;
+}
+
+.spd-tags {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.spd-total {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.spd-note {
+  color: var(--ss-text);
+}
+
+.spd-note[data-tone='danger'] {
+  color: var(--ss-danger-text);
+  font-weight: 600;
+}
+
+.spd-when,
+.spd-row > :last-child {
+  justify-self: end;
+  text-align: right;
+}
+
+.spd-when {
+  color: var(--ss-text);
+  font-size: 13px;
+}
+
+/* The new row: tinted while it is evaluated, then an ordinary row */
+.spd-new {
+  border-top: 1px solid var(--ss-line-faint);
+  border-radius: 10px;
+  background: #eef9f2;
+  transition: background-color 1.2s ease 0.6s;
+}
+
+.spd-new[data-done] {
+  background: transparent;
+}
+
+.spd-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spd-meter {
+  width: 84px;
+}
+
+.spd-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 220px;
+  height: 20px;
+  color: var(--ss-text-strong);
+}
+
+.spd-stage__model {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.spd-stage .ss-spinner {
+  color: var(--ss-success);
+}
+
+.spd-count {
+  display: inline-flex;
+  gap: 4px;
+  color: var(--ss-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.spd-ok {
+  color: var(--ss-success-text);
+  font-weight: 500;
+}
+
+.spd-now {
+  color: var(--ss-text-strong);
+}

@@ -1,0 +1,224 @@
+/* The assessment sheet. Shares sapa.css for the bar, ground, panels and type. */
+
+.sps .ss-stage {
+  --ss-warning-soft: #fff1dc;
+  --ss-warning-text: #8a4300;
+}
+
+.sps .sp-win {
+  height: 760px;
+}
+
+/* Head: title, tags, then the status and the save on the right */
+.sps-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-height: 84px;
+  padding: 18px 24px;
+  box-sizing: border-box;
+}
+
+.sps-head .sp-title {
+  margin-right: 8px;
+}
+
+.sps-version {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.sps-head__end {
+  flex: 1;
+}
+
+.sps-status {
+  min-height: 40px;
+}
+
+.sps-quiet {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  color: var(--ss-text);
+  font-size: 13px;
+}
+
+.sps-dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.sps-dirty__text {
+  color: var(--ss-warning-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.sps-saved {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  color: var(--ss-success-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Two panels: the criteria with weights, and the open criterion */
+.sps-cols {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 404px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.sps-list,
+.sps-edit {
+  padding: 20px 22px;
+}
+
+.sps-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px 32px;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  margin: 0 -12px;
+  padding: 0 12px;
+  border-top: 1px solid var(--ss-line-faint);
+  border-radius: 0;
+}
+
+.sp-label + .sps-row {
+  border-top: 0;
+}
+
+.sps-row[data-open] {
+  border-radius: 10px;
+  background: #f3f5f7;
+}
+
+.sps-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sps-row__title {
+  overflow: hidden;
+  color: var(--ss-text-strong);
+  font-size: 15px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sps-row__kind {
+  color: var(--ss-text);
+  font-size: 12px;
+}
+
+.sps-row__weight {
+  color: var(--ss-text-strong);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sps-changed {
+  justify-self: end;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.sps-changed[data-show] {
+  opacity: 1;
+}
+
+/* The open criterion: its properties as a short list, then its conditions */
+.sps-props {
+  margin-bottom: 14px;
+}
+
+.sps-prop {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  border-top: 1px solid var(--ss-line-faint);
+  font-size: 14px;
+}
+
+.sps-prop:first-child {
+  border-top: 0;
+}
+
+.sps-prop__k {
+  color: var(--ss-text);
+}
+
+.sps-prop__v {
+  color: var(--ss-text-strong);
+  font-weight: 500;
+}
+
+.sps-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sps-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sps-text__label {
+  color: var(--ss-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sps-text__body {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f3f5f7;
+  color: var(--ss-text-strong);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/* The team's notes for the model, each with its switch */
+.sps-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 14px;
+}
+
+.sps-note {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 24px;
+  color: var(--ss-text-strong);
+  font-size: 14px;
+  line-height: 1.4;
+  transition: color 0.25s ease;
+}
+
+.sps-note[data-off] {
+  color: var(--ss-text-faint);
+}
+
+.sps .ss-toggle[data-on] {
+  background: var(--ss-success);
+}

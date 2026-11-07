@@ -1,0 +1,567 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=block');
+
+/* Sapa in Freedom's look: the deep green of the logo's shield on the product
+   bar, then white panels with a soft radius on a light gray ground. Freedom
+   green marks what is good and what is linked; red only marks "Нет". */
+.sp .ss-stage {
+  --gutter: 32px;
+  --ss-font: Inter, system-ui, -apple-system, sans-serif;
+  --ss-accent: #02b140;
+  --ss-accent-soft: rgba(2, 177, 64, 0.14);
+  --ss-accent-text: #00873a;
+  --ss-success: #02b140;
+  --ss-success-soft: #dff5ec;
+  --ss-success-text: #00602a;
+  --ss-danger-soft: #fdecec;
+  --ss-danger-text: #b42323;
+  --ss-text-strong: #0e151c;
+  --ss-text: #56616d;
+  --ss-text-faint: #87929e;
+  --ss-line: #e4e8ed;
+  --ss-line-faint: #eef1f4;
+  --ss-radius-sm: 8px;
+  --ss-radius-md: 10px;
+  --ss-radius-lg: 14px;
+  --ss-radius-window: 18px;
+
+  --sp-brand: #164734;
+  --sp-ground: #eef0f3;
+  --sp-op: #e5f5ea;
+  --sp-client: #f1f4f7;
+
+  overflow: hidden;
+  background: #e2e6ea;
+  font-family: var(--ss-font);
+}
+
+/* One wide window, inset top and sides, running off the bottom */
+.sp-win {
+  position: absolute;
+  top: var(--gutter);
+  left: var(--gutter);
+  width: 976px;
+  height: 880px;
+  box-shadow: var(--ss-shadow-hero);
+}
+
+/* The window's unified toolbar is the product bar */
+.sp-win > .ss-window__bar {
+  border-bottom: 0;
+  background: var(--sp-brand);
+  color: #ffffff;
+}
+
+.sp-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: 14px;
+}
+
+.sp-bar-end {
+  width: 1px;
+}
+
+.sp-logo {
+  display: block;
+  height: 16px;
+  width: auto;
+}
+
+.sp-sep {
+  width: 1px;
+  height: 16px;
+  background: currentColor;
+  opacity: 0.3;
+}
+
+.sp-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.sp-nav {
+  display: flex;
+  gap: 2px;
+  margin-left: 18px;
+}
+
+.sp-nav__item {
+  padding: 4px 11px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.sp-nav__item[data-active] {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+/* The ground and its panels: one level, white, softly rounded, no outline */
+.sp-app {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  padding: 14px;
+  background: var(--sp-ground);
+}
+
+.sp-panel {
+  min-width: 0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+/* Head: the title and its stages on the left, the total and its range on the right */
+.sp-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 40px;
+  padding: 22px 24px;
+}
+
+.sp-head__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.sp-titleline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-titleline__end {
+  flex: 1;
+}
+
+.sp-title {
+  margin-right: 6px;
+  color: var(--ss-text-strong);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.sp-tag {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #f1f3f6;
+  color: var(--ss-text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* The stages as one rail: a mark, the name, its time under it; the rail
+   between two marks turns green once the first is done */
+.sp-stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sp-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 3px;
+  color: var(--ss-text-faint);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.sp-stage:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: 22px;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 1px;
+  background: #e3e7ec;
+  transition: background-color 0.4s ease;
+}
+
+.sp-stage[data-state='done']:not(:last-child)::after {
+  background: #b9e5c8;
+}
+
+.sp-stage__name {
+  position: relative;
+  z-index: 1;
+  justify-self: start;
+  padding-right: 8px;
+  background: #ffffff;
+}
+
+.sp-stage__time {
+  grid-column: 2;
+}
+
+.sp-stage[data-state='run'],
+.sp-stage[data-state='done'] {
+  color: var(--ss-text-strong);
+}
+
+.sp-stage__mark {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  color: var(--ss-success);
+}
+
+.sp-stage__dot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid #c9d0d7;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.sp-stage__name {
+  font-weight: 500;
+}
+
+.sp-stage__time {
+  color: var(--ss-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-count {
+  display: inline-flex;
+  gap: 4px;
+}
+
+/* The total and its range */
+.sp-score {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  width: 210px;
+}
+
+.sp-score__num {
+  color: var(--ss-text-strong);
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-range {
+  position: relative;
+  display: grid;
+  grid-template-columns: 60fr 20fr 20fr;
+  gap: 3px;
+  width: 100%;
+  height: 6px;
+  opacity: 0.35;
+  transition: opacity 0.4s ease;
+}
+
+.sp-range[data-show] {
+  opacity: 1;
+}
+
+.sp-range__band {
+  border-radius: 3px;
+}
+
+.sp-range__band[data-band='low'] { background: #f6d4d4; }
+.sp-range__band[data-band='mid'] { background: #f7e2b8; }
+.sp-range__band[data-band='high'] { background: #bfe8cd; }
+
+.sp-range__mark {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 0 2.5px var(--ss-text-strong), 0 2px 6px rgba(14, 21, 28, 0.18);
+  opacity: 0;
+  transition: left 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s, opacity 0.3s ease;
+}
+
+.sp-range[data-show] .sp-range__mark {
+  opacity: 1;
+}
+
+.sp-score__sub {
+  color: var(--ss-text);
+  font-size: 12px;
+}
+
+.sp-rerun {
+  color: var(--ss-accent-text);
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.sp-rerun[data-show] {
+  opacity: 1;
+}
+
+/* Two panels under the head */
+.sp-cols {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 372px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.sp-chat,
+.sp-list {
+  padding: 20px 22px;
+}
+
+.sp-turn[data-who='bot'] .sp-bubble {
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px var(--ss-line);
+}
+
+.sp-turn[data-who='bot'] .sp-bubble .ss-bar {
+  margin: 5px 0;
+}
+
+.sp-label {
+  margin-bottom: 12px;
+  color: var(--ss-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Conversation */
+.sp-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sp-turn {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-turn__n {
+  color: var(--ss-text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.25s ease;
+}
+
+/* The checked range is marked on the turn numbers, not with a box */
+.sp-turn[data-range] .sp-turn__n {
+  color: var(--ss-accent-text);
+  font-weight: 600;
+}
+
+.sp-turn__system {
+  justify-self: center;
+  color: var(--ss-text);
+  font-size: 12px;
+}
+
+.sp-bubble {
+  justify-self: start;
+  max-width: 92%;
+  padding: 8px 12px;
+  border-radius: 14px 14px 14px 4px;
+  background: var(--sp-client);
+  color: var(--ss-text-strong);
+  font-size: 14px;
+  line-height: 1.35;
+  box-shadow: 0 0 0 0 transparent;
+  transition: box-shadow 0.25s ease;
+}
+
+.sp-turn[data-who='op'] .sp-bubble {
+  justify-self: end;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--sp-op);
+}
+
+.sp-turn[data-who='client'] .sp-bubble .ss-bar {
+  margin: 5px 0;
+}
+
+.sp-bubble[data-evidence] {
+  box-shadow: 0 0 0 2px var(--ss-success);
+}
+
+/* Criteria */
+.sp-crit {
+  border-top: 1px solid var(--ss-line-faint);
+}
+
+.sp-label + .sp-crit {
+  border-top: 0;
+}
+
+.sp-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  margin: 0 -12px;
+  padding: 0 12px;
+  border-radius: 10px;
+  transition: background-color 0.15s ease;
+}
+
+.sp-row[data-hover],
+.sp-crit[data-open] .sp-row {
+  background: #f3f5f7;
+}
+
+.sp-row__title {
+  overflow: hidden;
+  color: var(--ss-text-strong);
+  font-size: 15px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A badge and its skeleton share one cell: the bar fades as the badge lands */
+.sp-slot {
+  display: grid;
+  justify-items: end;
+  align-items: center;
+}
+
+.sp-slot > * {
+  grid-area: 1 / 1;
+}
+
+.sp-sk {
+  overflow: hidden;
+  position: relative;
+  transition: opacity 0.25s ease, visibility 0s;
+}
+
+.sp-slot[data-ready] .sp-sk {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.12s ease, visibility 0s 0.12s;
+}
+
+.sp-sk::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.6), transparent);
+  translate: -100% 0;
+  animation: sp-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes sp-shimmer {
+  to { translate: 100% 0; }
+}
+
+.sp-real {
+  will-change: transform;
+  opacity: 0;
+  translate: 0 3px;
+  transition: opacity 0.2s ease, translate 0.2s ease;
+}
+
+.sp-slot[data-ready] .sp-real {
+  opacity: 1;
+  translate: 0 0;
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), translate 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sp .ss-badge {
+  font-size: 12px;
+}
+
+.sp-scale {
+  color: var(--ss-text-strong);
+}
+
+/* The explanation under the opened criterion */
+.sp-why {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 16px;
+}
+
+.sp-why__text {
+  margin: 0;
+  color: var(--ss-text-strong);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sp-why__ref {
+  color: var(--ss-text);
+  font-size: 12px;
+}
+
+.sp-why__actions {
+  margin-top: 4px;
+  min-height: 34px;
+}
+
+.sp-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+/* Freedom's own call to action: the brand gradient with dark text */
+.sp-cta {
+  border: 0;
+  background: linear-gradient(91deg, #7d8dee -2%, #1ccc9e 26%, #1ae276 83%);
+  color: #0d1a14;
+  font-weight: 600;
+}
+
+.sp-cta[data-hover] {
+  filter: saturate(1.08) brightness(0.98);
+}
+
+.sp-decided {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  color: var(--ss-success-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* The line from the opened criterion to the turn it was judged on */
+.sp-link {
+  --ss-accent: #02b140;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-sk::after { animation: none; }
+}

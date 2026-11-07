@@ -9,8 +9,9 @@
 | [frontend/](frontend/) | Интерфейс: список, карточка, чек-листы, апелляции, отчёт | `feat/frontend` |
 | [backend/](backend/) | API, импорт, SQLite, очередь оценок, экспорт | `feat/backend` |
 | [ai/](ai/) | Рубрика, промпт, вызов модели, проверка ответа, расчёт, замеры | `feat/ai` |
+| [design/](design/) | Утверждённый макет интерфейса и спецификация для реализации | `main` |
 
-[CONTRACTS.md](CONTRACTS.md) описывает, как части связаны. [AGENTS.md](AGENTS.md) содержит полный контекст задачи.
+[CONTRACTS.md](CONTRACTS.md) описывает, как части связаны. [AGENTS.md](AGENTS.md) содержит полный контекст задачи. Интерфейс строится по [design/SAPA_UI_SPEC.md](design/SAPA_UI_SPEC.md).
 
 ## Быстрый старт
 
