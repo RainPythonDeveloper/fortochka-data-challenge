@@ -2,7 +2,7 @@ import { X } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../api';
 import type { CompareCriterion, CompareValue, EvaluationSummary } from '../api/types';
-import { fmtNumber, fmtScore, plainAnswer, runLabel } from '../lib/format';
+import { fmtNumber, fmtPoints, fmtScore, plainAnswer, runLabel } from '../lib/format';
 import { FROM_CACHE } from '../lib/labels';
 import { useAsync } from '../lib/useAsync';
 import { Button, ErrorState, LoadingState, Modal, Tag } from './ui';
@@ -14,7 +14,7 @@ function ValueCell({ value }: { value: CompareValue | null }) {
   return (
     <td>
       {plainAnswer(value.status, value.answer)}
-      <span className="ml-2 text-text">{fmtNumber(value.points)} б., вес {fmtNumber(value.weight)}</span>
+      <span className="ml-2 text-text">{value.points === null ? 'без баллов' : fmtPoints(value.points)}, вес {fmtNumber(value.weight)}</span>
     </td>
   );
 }

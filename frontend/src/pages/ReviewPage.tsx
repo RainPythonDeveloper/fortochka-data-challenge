@@ -1,12 +1,15 @@
+import { Headphones, History, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import type { ChecklistVersion, ConversationDetail, EvaluationRun, EvaluationSummary } from '../api/types';
+import { ChannelMark } from '../components/ChannelMark';
 import { CompareDialog } from '../components/CompareDialog';
 import { CriteriaList } from '../components/CriteriaList';
 import { EvidenceLink } from '../components/EvidenceLink';
 import { RerunMenu } from '../components/RerunMenu';
 import { RunLogPanel } from '../components/RunLogPanel';
+import { ScoreBreakdown } from '../components/ScoreBreakdown';
 import { ScoreBlock } from '../components/ScoreBlock';
 import { StageRail } from '../components/StageRail';
 import { TurnList, type TurnFocus } from '../components/TurnList';
@@ -15,8 +18,11 @@ import { host } from '../host/hostAdapter';
 import { PERSONAL_DATA_FLAG, channelLabel, errorText, isStubRun, languageLabel, visibleFlags } from '../lib/format';
 import { progressFor, useJobs } from '../lib/jobs';
 import { GROSS, MOCK_LABEL } from '../lib/labels';
+import { reducedMotion } from '../lib/motion';
 import { useAsync } from '../lib/useAsync';
 
+const ROW_TOP_GAP = 8;
+const UNFOLD_MS = 260;
 const SETTLE_MS = 2500;
 const REVEAL_MS = 1500;
 
@@ -36,9 +42,8 @@ async function sheetForChannel(channel: string): Promise<ChecklistVersion | null
 function focusFor(run: EvaluationRun | null, criterionId: string | null, nonce: number, turn: number | null): TurnFocus | null {
   const result = criterionId ? run?.final_results.find((item) => item.criterion_id === criterionId) : undefined;
   if (!result) return turn === null ? null : { evidence: [], range: null, target: turn, nonce };
-  const evidence = result.evidence.map((item) => item.turn_index);
-  const target = turn ?? evidence[0] ?? result.expected_at_turn ?? result.reviewed_range?.from_turn ?? null;
-  return { evidence, range: result.reviewed_range, target, nonce };
+  const target = turn ?? result.evidence[0]?.turn_index ?? result.expected_at_turn ?? result.reviewed_range?.from_turn ?? null;
+  return { evidence: result.evidence, range: result.reviewed_range, target, nonce };
 }
 
 type RunPanelProps = { detail: ConversationDetail; run: EvaluationRun | null; retry: () => void; busy: boolean; failure: string | null };
@@ -169,11 +174,17 @@ function ReviewView({ id }: { id: string }) {
   const turnScroller = useRef<HTMLDivElement>(null);
   const columns = useRef<HTMLDivElement>(null);
 
-  // A link with ?criterion= opens the row below the fold: bring it into view.
+  // Once the row has unfolded, bring it to the top so its explanation is not below the edge.
   useEffect(() => {
-    if (!openId || !run) return;
-    const row = criteriaScroller.current?.querySelector(`[data-crit-row="${openId}"]`);
-    row?.scrollIntoView({ block: 'nearest' });
+    const box = criteriaScroller.current;
+    if (!openId || !run || !box) return;
+    const timer = setTimeout(() => {
+      const row = box.querySelector(`[data-crit-row="${openId}"]`);
+      if (!row) return;
+      const top = box.scrollTop + row.getBoundingClientRect().top - box.getBoundingClientRect().top - ROW_TOP_GAP;
+      box.scrollTo({ top, behavior: reducedMotion() ? 'auto' : 'smooth' });
+    }, UNFOLD_MS);
+    return () => clearTimeout(timer);
   }, [openId, run]);
 
   const busy = running || awaiting;
@@ -217,16 +228,27 @@ function ReviewView({ id }: { id: string }) {
         <div className="rhead__main">
           <div className="rhead__line">
             <h1 className="title">Диалог {detail.id}</h1>
-            <Tag>{channelLabel(detail.channel)}</Tag>
-            <Tag>{languageLabel(detail.language)}</Tag>
-            {shownRun?.final_score.gross_error && <span className="badge" data-tone="bad">{GROSS}</span>}
-            {shownRun && isStubRun(shownRun) && <Tag tone="amber">{MOCK_LABEL}</Tag>}
-            {detail.has_audio && <Button variant="text" className="ml-2" onClick={openAudio}>Открыть запись</Button>}
-            {audioNotice && <span role="status" className="notice">{audioNotice}</span>}
             <div className="rhead__actions">
               {!busy && <RerunMenu conversationId={detail.id} channel={detail.channel} label={runId ? 'Оценить заново' : 'Оценить'} />}
-              {runs.length > 1 && <Button variant="text" onClick={() => setShowHistory(true)}>История оценок</Button>}
+              {runs.length > 1 && (
+                <button type="button" className="icon-action" aria-label="История оценок" title="История оценок" onClick={() => setShowHistory(true)}>
+                  <History size={18} strokeWidth={1.75} />
+                </button>
+              )}
+              {detail.has_audio && (
+                <button type="button" className="icon-action" aria-label="Открыть запись" title="Открыть запись" onClick={openAudio}>
+                  <Headphones size={18} strokeWidth={1.75} />
+                </button>
+              )}
             </div>
+            <span className="rhead__meta">
+              <ChannelMark channel={detail.channel} language={languageLabel(detail.language)} />
+              {shownRun?.final_score.gross_error && (
+                <Tag tone="bad"><ShieldAlert size={15} strokeWidth={1.75} aria-hidden /> {GROSS}</Tag>
+              )}
+              {shownRun && isStubRun(shownRun) && <Tag tone="amber">{MOCK_LABEL}</Tag>}
+              {audioNotice && <span role="status" className="notice">{audioNotice}</span>}
+            </span>
           </div>
           <StageRail run={run} progress={progress ?? (awaiting ? lastProgress.current : null)} onOpenLog={() => setShowLog(true)} />
         </div>
@@ -242,8 +264,11 @@ function ReviewView({ id }: { id: string }) {
         </Panel>
         <Panel className="scroll-panel">
           <div className="panel-label">Оценка по критериям</div>
+          {hasResults && shownRun?.checklist && (
+            <ScoreBreakdown run={shownRun} checklist={shownRun.checklist} openId={openId} onToggle={toggle} />
+          )}
           <div ref={criteriaScroller} data-scroller className="scroll-panel__body">
-            <div>
+            <div className="criteria">
               {loaded.error ? (
                 <ErrorState message={loaded.error} onRetry={loaded.reload} />
               ) : busy && !checklist ? (
@@ -256,6 +281,7 @@ function ReviewView({ id }: { id: string }) {
                     <CriteriaList
                       checklist={checklist}
                       run={shownRun}
+                      turns={detail.turns}
                       appeals={(appeals.data ?? []).filter((item) => item.evaluation_id === runId)}
                       openId={openId}
                       reveal={reveal}

@@ -1,26 +1,39 @@
-import { MoreHorizontal } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowRight,
+  ArrowUp,
+  CheckCircle2,
+  Gavel,
+  MoreHorizontal,
+  Play,
+  Plus,
+  RotateCw,
+  ShieldAlert,
+  TriangleAlert,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import type { Appeal, ConversationSummary, EvaluationRun, ImportResult } from '../api/types';
-import { Button, EmptyState, ErrorState, LoadingState, Menu, Panel, Spinner, Swap, Tag } from '../components/ui';
+import type { Appeal, ChecklistVersion, ConversationSummary, EvaluationRun, ImportResult } from '../api/types';
+import { ChannelMark } from '../components/ChannelMark';
+import { StatsPanel } from '../components/DashboardRail';
+import { Button, EmptyState, ErrorState, LoadingState, Menu, Panel, Spinner, Swap } from '../components/ui';
 import { host } from '../host/hostAdapter';
 import {
   PERSONAL_DATA_FLAG,
   STUB_FLAG,
-  channelLabel,
   errorText,
   fmtClock,
   fmtDuration,
-  fmtNumber,
   fmtRelative,
   fmtScore,
-  plural,
   splitImportMessages,
 } from '../lib/format';
 import { isActive, progressFor, useJobs, type Progress } from '../lib/jobs';
 import { FROM_CACHE, GROSS, stageName } from '../lib/labels';
 import { useCountUp, useElapsed } from '../lib/motion';
+import { VERDICTS, shownTotal, verdictOf, type VerdictId } from '../lib/scoreBands';
 import { useAsync } from '../lib/useAsync';
 
 const REFRESH_MS = 3000;
@@ -28,7 +41,8 @@ const SHORT_ERROR = 60;
 const ENTER_MS = 1500;
 const STAGE_PROGRESS = { parse: 0.1, model: 0.85, validate: 0.95, score: 0.95 } as const;
 
-type Tab = 'all' | 'attention' | 'appeals';
+type Tab = 'all' | 'attention' | 'appeals' | 'gross' | 'failed' | 'waiting' | 'disputed';
+type Sort = { key: 'when' | 'total'; descending: boolean };
 
 type Finished = { ms: number | null };
 
@@ -41,13 +55,15 @@ type Row = ConversationSummary & {
   evaluatedAt: string | null;
   appeal: Appeal | null;
   openAppeals: number;
+  /** What the screen shows: a gross violation zeroes it. */
+  total: number | null;
+  verdict: ReturnType<typeof verdictOf>;
 };
 
-function toRow(item: ConversationSummary, run: EvaluationRun | undefined, appeals: Appeal[]): Row {
+function toRow(item: ConversationSummary, run: EvaluationRun | undefined, own: Appeal[]): Row {
   const known = item.latest_status !== undefined;
   const reasons = (known ? item.latest_reasons : run?.review_reasons) ?? [];
   const review = known ? item.review_status : run?.review_status;
-  const own = appeals.filter((appeal) => appeal.evaluation_id === item.latest_evaluation_id);
   return {
     ...item,
     status: (known ? item.latest_status : run?.status) ?? null,
@@ -58,33 +74,57 @@ function toRow(item: ConversationSummary, run: EvaluationRun | undefined, appeal
     evaluatedAt: (known ? item.latest_evaluated_at : run?.created_at) ?? null,
     appeal: own[0] ?? null,
     openAppeals: item.open_appeals ?? own.length,
+    total: shownTotal(item.latest_total, item.gross_error),
+    verdict: verdictOf(item.latest_total, item.gross_error),
   };
 }
 
 const needsAttention = (row: Row) => row.gross_error || row.status === 'failed' || !row.latest_evaluation_id || row.flagged;
+const isBlocked = (row: Row) => row.reasons.includes(PERSONAL_DATA_FLAG);
 
-type Note = { text: string; tone?: 'bad' | 'warn' | 'good'; title?: string; action?: string };
+const TAB_LABELS: Record<Tab, string> = {
+  all: 'Все',
+  attention: 'Требуют внимания',
+  waiting: 'Не оценены',
+  gross: 'Грубые нарушения',
+  appeals: 'Апелляции',
+  failed: 'Сбои оценки',
+  disputed: 'Спорные места',
+};
+const MAIN_TABS: Tab[] = ['all', 'attention', 'waiting'];
+
+const TAB_FILTERS: Record<Tab, (row: Row) => boolean> = {
+  all: () => true,
+  attention: needsAttention,
+  appeals: (row) => row.openAppeals > 0,
+  gross: (row) => row.gross_error,
+  failed: (row) => row.status === 'failed',
+  waiting: (row) => !row.latest_evaluation_id,
+  disputed: (row) => row.flagged,
+};
+
+type Note = { text: string; tone?: 'bad' | 'warn' | 'good'; title?: string };
 
 function noteFor(row: Row, finished: Finished | undefined): Note | null {
   if (row.gross_error) return { text: GROSS, tone: 'bad' };
   if (row.openAppeals > 0) return { text: 'Апелляция ждёт решения' };
   if (row.status === 'failed') {
-    if (row.reasons.includes(PERSONAL_DATA_FLAG)) return { text: 'Не отправлен: персональные данные', tone: 'warn', title: row.error ?? undefined };
+    if (isBlocked(row)) return { text: 'Не отправлен: персональные данные', tone: 'warn', title: row.error ?? undefined };
     const reason = row.error ?? 'причина не указана';
     const short = reason.length > SHORT_ERROR ? `${reason.slice(0, SHORT_ERROR)}…` : reason;
-    return { text: `Сбой: ${short}`, tone: 'warn', title: reason, action: 'Повторить' };
+    return { text: `Сбой: ${short}`, tone: 'warn', title: reason };
   }
   if (finished) {
     return { text: finished.ms === null ? FROM_CACHE : `Оценено за ${fmtDuration(finished.ms)}`, tone: 'good' };
   }
   if (row.flagged) return { text: 'Есть спорные места' };
-  if (!row.latest_evaluation_id) return { text: 'Не оценён', action: 'Оценить' };
+  if (!row.latest_evaluation_id) return { text: 'Не оценён' };
   return null;
 }
 
 function TotalCell({ row, counted }: { row: Row; counted: boolean }) {
-  const shown = useCountUp(row.latest_total, { fromZero: counted });
-  if (row.latest_total === null) return <span className="drow__total" data-dim>—</span>;
+  const shown = useCountUp(row.total, { fromZero: counted });
+  if (row.total === null) return <span className="drow__total" data-dim>—</span>;
   return <span className="drow__total">{fmtScore(shown)}</span>;
 }
 
@@ -104,13 +144,13 @@ function RunningCells({ progress }: { progress: Progress }) {
           fmtClock(elapsed)
         )}
       </span>
+      <span />
       <span className="drow__note">
         <span className="drow-stage">
           <Spinner />
           <Swap id={label}>{label}</Swap>
         </span>
       </span>
-      <span className="drow__when" data-now>только что</span>
     </>
   );
 }
@@ -121,18 +161,29 @@ type RowProps = {
   finished: Finished | undefined;
   entering: boolean;
   onEvaluate: (ids: string[]) => void;
-  tab: Tab;
 };
 
-function DialogRow({ row, progress, finished, entering, onEvaluate, tab }: RowProps) {
+function DialogRow({ row, progress, finished, entering, onEvaluate }: RowProps) {
   const navigate = useNavigate();
-  const params = tab === 'appeals' && row.appeal ? `?criterion=${encodeURIComponent(row.appeal.criterion_id)}&run=${encodeURIComponent(row.appeal.evaluation_id)}` : '';
-  const href = `/conversations/${encodeURIComponent(row.id)}${params}`;
+  const appeal = row.appeal;
+  const params = appeal ? `?criterion=${encodeURIComponent(appeal.criterion_id)}&run=${encodeURIComponent(appeal.evaluation_id)}` : '';
+  const href = `/conversations/${encodeURIComponent(row.id)}`;
   const note = noteFor(row, finished);
-  const act = (event: MouseEvent) => {
+  const stop = (run: () => void) => (event: MouseEvent) => {
     event.stopPropagation();
-    onEvaluate([row.id]);
+    run();
   };
+  // One clear next step per row, the same priority as the note beside it.
+  const action = progress
+    ? null
+    : row.openAppeals > 0
+      ? { label: 'Рассмотреть апелляцию', icon: Gavel, run: () => navigate(`${href}${params}`) }
+      : row.status === 'failed' && !isBlocked(row)
+        ? { label: 'Оценить повторно', icon: RotateCw, run: () => onEvaluate([row.id]) }
+        : !row.latest_evaluation_id
+          ? { label: 'Оценить', icon: Play, run: () => onEvaluate([row.id]) }
+          : null;
+  const time = progress || finished ? 'только что' : fmtRelative(row.evaluatedAt);
   const cells = (
     <div
       className="drow"
@@ -141,28 +192,53 @@ function DialogRow({ row, progress, finished, entering, onEvaluate, tab }: RowPr
       data-settled={finished && !progress ? '' : undefined}
       onClick={() => navigate(href)}
     >
-      <Link className="drow__id" to={href} onClick={(event) => event.stopPropagation()}>{row.id}</Link>
-      <span className="drow__tags">
-        <Tag>{channelLabel(row.channel)}</Tag>
-        <Tag>{row.language}</Tag>
+      <span className="drow__who">
+        <Link className="drow__id" to={href} onClick={(event) => event.stopPropagation()}>{row.id}</Link>
+        {time && <span className="drow__time" data-now={progress || finished ? '' : undefined}>{time}</span>}
       </span>
+      <ChannelMark channel={row.channel} language={row.language} />
       {progress ? (
         <RunningCells progress={progress} />
       ) : (
         <>
           <TotalCell row={row} counted={Boolean(finished)} />
+          <span>{row.verdict && <span className="verdict" data-verdict={row.verdict.id}>{row.verdict.name}</span>}</span>
           <span className="drow__note" data-tone={note?.tone} title={note?.title}>
             {note && <span>{note.text}</span>}
-            {note?.action && <Button variant="text" onClick={act}>{note.action}</Button>}
-          </span>
-          <span className="drow__when" data-now={finished ? '' : undefined}>
-            {finished ? 'только что' : fmtRelative(row.evaluatedAt)}
           </span>
         </>
       )}
+      <span className="drow__act">
+        {action && (
+          <button type="button" className="icon-action" data-tone="go" aria-label={action.label} title={action.label} onClick={stop(action.run)}>
+            <action.icon size={17} strokeWidth={1.75} />
+          </button>
+        )}
+        <button type="button" className="icon-action" aria-label="Открыть разбор" title="Открыть разбор" onClick={stop(() => navigate(href))}>
+          <ArrowRight size={17} strokeWidth={1.75} />
+        </button>
+      </span>
     </div>
   );
   return entering ? <div className="row-enter"><div>{cells}</div></div> : cells;
+}
+
+function SortHead({ sort, id, label, onSort, end }: { sort: Sort; id: Sort['key']; label: string; onSort: (next: Sort) => void; end?: boolean }) {
+  const active = sort.key === id;
+  const Arrow = sort.descending ? ArrowDown : ArrowUp;
+  return (
+    <span className={end ? 'justify-self-end' : undefined}>
+      <button
+        type="button"
+        data-on={active || undefined}
+        aria-label={`Сортировать: ${label}`}
+        onClick={() => onSort({ key: id, descending: active ? !sort.descending : true })}
+      >
+        {label}
+        {active && <Arrow size={14} strokeWidth={1.75} />}
+      </button>
+    </span>
+  );
 }
 
 function recordsIn(text: string): unknown[] {
@@ -206,9 +282,16 @@ function ImportForm({ onDone }: { onDone: (result: ImportResult) => void }) {
 export function ConversationsPage() {
   const { jobs, revision, track } = useJobs();
   const conversations = useAsync(() => api.listConversations(), [revision]);
-  const report = useAsync(() => api.getReport(), [revision]);
   const openAppeals = useAsync(() => api.listAppeals({ status: 'open' }), [revision]);
+  const exported = useAsync(() => api.exportResults(), [revision]);
+  const sheets = useAsync(
+    async (): Promise<ChecklistVersion[]> => Promise.all((await api.listChecklists()).map((item) => api.getChecklist(item.checklist_id))),
+    [revision],
+  );
   const [tab, setTab] = useState<Tab>('all');
+  const [sort, setSort] = useState<Sort>({ key: 'when', descending: true });
+  const [verdict, setVerdict] = useState<VerdictId | null>(null);
+  const [appealOwners, setAppealOwners] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
   const [dragging, setDragging] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -220,7 +303,6 @@ export function ConversationsPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
   const reloadList = conversations.reload;
-  const reloadReport = report.reload;
 
   const hasActive = jobs.some(isActive);
   useEffect(() => {
@@ -262,25 +344,62 @@ export function ConversationsPage() {
   }, [items, runs]);
 
   const appealList = useMemo(() => openAppeals.data ?? [], [openAppeals.data]);
-  const rows = useMemo(() => {
-    const built = items.map((item) => toRow(item, runs[item.id], appealList));
-    const weight = (row: Row) => (fresh.has(row.id) ? 2 : row.evaluatedAt ? 1 : 0);
-    return built.sort(
-      (a, b) => weight(b) - weight(a) || (b.evaluatedAt ?? '').localeCompare(a.evaluatedAt ?? '') || a.id.localeCompare(b.id),
-    );
-  }, [items, runs, appealList, fresh]);
 
-  const needle = search.trim().toLowerCase();
-  const attention = rows.filter(needsAttention);
-  const withAppeals = rows.filter((row) => row.openAppeals > 0);
-  const shown = (tab === 'attention' ? attention : tab === 'appeals' ? withAppeals : rows).filter(
-    (row) => !needle || row.id.toLowerCase().includes(needle),
+  // An appeal can sit on an older run of a dialogue, so its owner is not always in the summary.
+  useEffect(() => {
+    const latest = new Set(items.map((item) => item.latest_evaluation_id));
+    for (const appeal of appealList) {
+      if (latest.has(appeal.evaluation_id) || appealOwners[appeal.evaluation_id]) continue;
+      api.getEvaluation(appeal.evaluation_id).then(
+        (run) => setAppealOwners((current) => ({ ...current, [run.id]: run.conversation_id })),
+        () => undefined,
+      );
+    }
+  }, [items, appealList, appealOwners]);
+
+  const ownerOf = useCallback(
+    (appeal: Appeal) => items.find((item) => item.latest_evaluation_id === appeal.evaluation_id)?.id ?? appealOwners[appeal.evaluation_id] ?? null,
+    [items, appealOwners],
   );
 
-  const totals = rows.flatMap((row) => (row.latest_total === null ? [] : [row.latest_total]));
+  const rows = useMemo(() => {
+    const built = items.map((item) => toRow(item, runs[item.id], appealList.filter((appeal) => ownerOf(appeal) === item.id)));
+    const direction = sort.descending ? 1 : -1;
+    const rank = (row: Row) => (fresh.has(row.id) ? 2 : row.evaluatedAt ? 1 : 0);
+    return built.sort((a, b) => {
+      if (rank(a) !== rank(b)) return rank(b) - rank(a);
+      // A dialogue without a total stays below the others in either direction.
+      if (sort.key === 'total' && (a.total === null) !== (b.total === null)) {
+        return a.total === null ? 1 : -1;
+      }
+      const order = sort.key === 'total'
+        ? (b.total ?? 0) - (a.total ?? 0)
+        : (b.evaluatedAt ?? '').localeCompare(a.evaluatedAt ?? '');
+      return order * direction || a.id.localeCompare(b.id);
+    });
+  }, [items, runs, appealList, ownerOf, fresh, sort]);
+
+  const needle = search.trim().toLowerCase();
+  const countOf = (id: Tab) => rows.filter(TAB_FILTERS[id]).length;
+  const shown = rows
+    .filter(TAB_FILTERS[tab])
+    .filter((row) => !verdict || row.verdict?.id === verdict)
+    .filter((row) => !needle || row.id.toLowerCase().includes(needle));
+
+  const totals = rows.flatMap((row) => (row.total === null ? [] : [row.total]));
   const average = totals.length ? totals.reduce((sum, value) => sum + value, 0) / totals.length : null;
-  const grossCount = rows.filter((row) => row.gross_error).length;
+  const verdictCounts = Object.fromEntries(
+    VERDICTS.map((item) => [item.id, rows.filter((row) => row.verdict?.id === item.id).length]),
+  ) as Record<VerdictId, number>;
+  const grossCount = countOf('gross');
+  const failedRows = rows.filter(TAB_FILTERS.failed);
+  const retryable = failedRows.filter((row) => !isBlocked(row)).map((row) => row.id);
+  const evaluatedCount = rows.filter((row) => row.status === 'done').length;
   const failedJobs = jobs.filter(({ job, pollError }) => pollError || (job.status === 'failed' && !job.evaluation_ids.length));
+  const pick = (next: Tab) => {
+    setTab(tab === next ? 'all' : next);
+    setVerdict(null);
+  };
 
   const evaluate = useCallback(
     async (ids: string[]) => {
@@ -316,10 +435,9 @@ export function ConversationsPage() {
       setSearch('');
       setFresh((current) => new Map([...current, ...added.map((id): [string, number] => [id, Date.now()])]));
       reloadList();
-      reloadReport();
       await evaluate(added);
     },
-    [evaluate, reloadList, reloadReport],
+    [evaluate, reloadList],
   );
 
   // The whole page takes a file, so the listeners sit on the window.
@@ -377,14 +495,26 @@ export function ConversationsPage() {
 
   return (
     <>
-      <Panel className="head-row">
-        <h1 className="title">Диалоги</h1>
-        <div className="stats">
-          <span className="stat"><b>{report.data?.evaluated ?? '—'}</b> из {report.data?.conversations ?? '—'} оценено</span>
-          <span className="stat"><b>{fmtNumber(average, 1)}</b> средний итог</span>
-          <span className="stat"><b data-tone="bad">{grossCount}</b> {plural(grossCount, 'грубое нарушение', 'грубых нарушения', 'грубых нарушений')}</span>
+      <h1 className="sr-only">Диалоги</h1>
+      <Panel className="overview">
+        <div className="tiles">
+          {(
+            [
+              { id: 'waiting', icon: CheckCircle2, label: 'Оценено', value: evaluatedCount, of: rows.length, tone: 'good' },
+              { id: 'gross', icon: ShieldAlert, label: 'Грубые нарушения', value: grossCount, tone: grossCount ? 'bad' : undefined },
+              { id: 'appeals', icon: Gavel, label: 'Апелляции', value: countOf('appeals'), tone: undefined },
+              { id: 'failed', icon: TriangleAlert, label: 'Сбои оценки', value: failedRows.length, tone: failedRows.length ? 'warn' : undefined },
+              { id: 'disputed', icon: AlertTriangle, label: 'Спорные места', value: countOf('disputed'), tone: undefined },
+            ] as const
+          ).map((tile) => (
+            <button key={tile.id} type="button" className="tile" data-tone={tile.tone} aria-pressed={tab === tile.id} onClick={() => pick(tile.id)}>
+              <tile.icon size={20} strokeWidth={1.75} aria-hidden />
+              <span className="tile__label">{tile.label}</span>
+              <span className="tile__value">{tile.value}{'of' in tile && <small>из {tile.of}</small>}</span>
+            </button>
+          ))}
         </div>
-        <div className="head-row__end">
+        <div className="overview__end">
           <input
             ref={fileInput}
             type="file"
@@ -398,7 +528,9 @@ export function ConversationsPage() {
               uploadFiles(files);
             }}
           />
-          <Button variant="primary" size="large" onClick={() => fileInput.current?.click()}>Загрузить диалог</Button>
+          <Button variant="primary" size="large" onClick={() => fileInput.current?.click()}>
+            <Plus size={18} strokeWidth={2} aria-hidden /> Загрузить диалог
+          </Button>
           <Menu
             trigger={({ open, toggle }) => (
               <Button variant="icon" aria-label="Ещё" aria-expanded={open} onClick={toggle}>
@@ -426,7 +558,6 @@ export function ConversationsPage() {
                 setImported(result);
                 setShowImport(false);
                 reloadList();
-                reloadReport();
               }}
             />
           )}
@@ -455,61 +586,85 @@ export function ConversationsPage() {
         </div>
       )}
 
-      <div className="tabs-row">
-        <div role="tablist" className="flex gap-5">
-          {(
-            [
-              ['all', 'Все', rows.length],
-              ['attention', 'Требуют внимания', attention.length],
-              ['appeals', 'Апелляции', withAppeals.length],
-            ] as const
-          ).map(([id, label, count]) => (
-            <button key={id} type="button" role="tab" aria-selected={tab === id} className="tab" onClick={() => setTab(id)}>
-              {label} {count}
-            </button>
-          ))}
+      <div className="dash">
+        <div className="dash__main">
+          <div className="tabs-row">
+            <div role="tablist" className="tabs">
+              {[...MAIN_TABS, ...(MAIN_TABS.includes(tab) ? [] : [tab])].map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === id}
+                  className="tab"
+                  onClick={() => {
+                    setTab(id);
+                    setVerdict(null);
+                  }}
+                >
+                  {TAB_LABELS[id]} {countOf(id)}
+                </button>
+              ))}
+              {verdict && (
+                <button type="button" className="tab" aria-selected onClick={() => setVerdict(null)}>
+                  {VERDICTS.find((item) => item.id === verdict)?.name} {verdictCounts[verdict]} ×
+                </button>
+              )}
+            </div>
+            {tab === 'failed' && retryable.length > 0 && <Button variant="text" onClick={() => evaluate(retryable)}>Повторить все</Button>}
+            {tab === 'waiting' && notEvaluated.length > 0 && <Button variant="text" onClick={() => evaluate(notEvaluated)}>Оценить все</Button>}
+            <input
+              aria-label="Поиск по номеру диалога"
+              placeholder="Поиск по номеру"
+              className="field tabs-row__search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+
+          <Panel className="dialogs" data-over={dragging || undefined}>
+            <div className="drow drow--head">
+              <SortHead sort={sort} id="when" label="Диалог, время" onSort={setSort} />
+              <span>Канал</span>
+              <SortHead sort={sort} id="total" label="Итог" onSort={setSort} end />
+              <span>Оценка</span>
+              <span>Отметка</span>
+              <span className="justify-self-end">Действия</span>
+            </div>
+            <div className="dialogs__scroll">
+              {conversations.error ? (
+                <ErrorState message={conversations.error} onRetry={reloadList} />
+              ) : !conversations.data ? (
+                <LoadingState label="Загружаем диалоги…" />
+              ) : !shown.length ? (
+                <EmptyState title={rows.length ? 'Здесь ничего нет' : 'Диалогов пока нет'}>
+                  {!rows.length && 'Перетащите файл .json сюда или импортируйте группу через меню.'}
+                </EmptyState>
+              ) : (
+                shown.map((row) => (
+                  <DialogRow
+                    key={row.id}
+                    row={row}
+                    progress={progressFor(jobs, row.id, row.latest_evaluation_id)}
+                    finished={finished[row.id]}
+                    entering={Date.now() - (fresh.get(row.id) ?? 0) < ENTER_MS}
+                    onEvaluate={evaluate}
+                  />
+                ))
+              )}
+            </div>
+          </Panel>
         </div>
-        <input
-          aria-label="Поиск по номеру диалога"
-          placeholder="Поиск по номеру"
-          className="field tabs-row__search"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
+
+        <StatsPanel
+          average={average}
+          counts={verdictCounts}
+          active={verdict}
+          onVerdict={setVerdict}
+          results={exported.data}
+          sheets={sheets.data ?? []}
         />
       </div>
-
-      <Panel className="dialogs" data-over={dragging || undefined}>
-        <div className="drow drow--head">
-          <span>Диалог</span>
-          <span>Канал</span>
-          <span className="flex justify-end">Итог</span>
-          <span>Отметка</span>
-          <span className="justify-self-end">Когда</span>
-        </div>
-        <div className="dialogs__scroll">
-          {conversations.error ? (
-            <ErrorState message={conversations.error} onRetry={reloadList} />
-          ) : !conversations.data ? (
-            <LoadingState label="Загружаем диалоги…" />
-          ) : !shown.length ? (
-            <EmptyState title={rows.length ? 'Здесь ничего нет' : 'Диалогов пока нет'}>
-              {!rows.length && 'Перетащите файл .json сюда или импортируйте группу через меню.'}
-            </EmptyState>
-          ) : (
-            shown.map((row) => (
-              <DialogRow
-                key={row.id}
-                row={row}
-                tab={tab}
-                progress={progressFor(jobs, row.id, row.latest_evaluation_id)}
-                finished={finished[row.id]}
-                entering={Date.now() - (fresh.get(row.id) ?? 0) < ENTER_MS}
-                onEvaluate={evaluate}
-              />
-            ))
-          )}
-        </div>
-      </Panel>
     </>
   );
 }

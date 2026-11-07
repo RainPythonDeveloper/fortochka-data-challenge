@@ -1,79 +1,196 @@
-import type { Appeal, ChecklistVersion, Criterion, CriterionScore, EvaluationRun, SectionScore } from '../api/types';
-import { fmtNumber, fmtScore, visibleFlags } from '../lib/format';
+import { ChevronDown } from 'lucide-react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
+import type {
+  Appeal,
+  ChecklistVersion,
+  Criterion,
+  CriterionResult,
+  CriterionScore,
+  EvaluationRun,
+  SectionScore,
+  Turn,
+} from '../api/types';
+import { fmtNumber, fmtScore, speakerLabel, visibleFlags } from '../lib/format';
 import { AnswerBadge } from './AnswerBadge';
 import { AppealBlock } from './AppealBlock';
 import { Collapse } from './ui';
+
+const Chevron = () => <ChevronDown className="chevron" size={16} strokeWidth={1.75} aria-hidden />;
 
 const TurnLink = ({ index, onTurn }: { index: number; onTurn: (turn: number) => void }) => (
   <button type="button" className="turn-link" onClick={() => onTurn(index)}>#{index}</button>
 );
 
-function WeightLine({ criterion, score, notApplicable }: { criterion: Criterion; score?: CriterionScore; notApplicable: boolean }) {
-  if (criterion.flag || !criterion.scored) return <p className="why__small">Без баллов, на итог не влияет</p>;
-  if (notApplicable) return <p className="why__small">Вес {fmtNumber(criterion.weight)} распределён между остальными</p>;
-  const effective = score?.effective_weight ?? null;
-  const moved = effective !== null && Math.abs(effective - criterion.weight) > 0.005;
+const block = (position: number) => ({ '--i': position }) as CSSProperties;
+
+/** Links "#12" to its turn and underlines a «quote» that really is in the evidence. */
+function Conclusion({ result, onTurn }: { result: CriterionResult; onTurn: (turn: number) => void }) {
+  const parts: ReactNode[] = [];
+  const pattern = /#(\d+)|«([^»]+)»/g;
+  let last = 0;
+  for (const match of result.justification.matchAll(pattern)) {
+    parts.push(result.justification.slice(last, match.index));
+    last = match.index + match[0].length;
+    const quoted = match[2];
+    if (match[1]) {
+      parts.push(<TurnLink key={match.index} index={Number(match[1])} onTurn={onTurn} />);
+    } else {
+      const source = result.evidence.find((item) => item.quote.includes(quoted) || quoted.includes(item.quote));
+      parts.push(source ? <mark key={match.index} className="quote-inline">«{quoted}»</mark> : match[0]);
+    }
+  }
+  parts.push(result.justification.slice(last));
   return (
-    <p className="why__small">
-      Вес {fmtNumber(criterion.weight)}
-      {moved && ` → ${fmtScore(effective)} после исключения неприменимых`}
-      {score?.points !== null && score?.points !== undefined && ` · баллы ${fmtScore(score.points)}`}
+    <p className="why__text">
+      {parts}
+      {result.evidence.map((item, position) => (
+        <button
+          key={`${item.turn_index}-${position}`}
+          type="button"
+          className="cite"
+          aria-label={`Источник ${position + 1}, реплика ${item.turn_index}`}
+          onClick={() => onTurn(item.turn_index)}
+        >
+          {position + 1}
+        </button>
+      ))}
     </p>
+  );
+}
+
+function Sources({ result, turns, onTurn }: { result: CriterionResult; turns: Turn[]; onTurn: (turn: number) => void }) {
+  const range = result.reviewed_range;
+  const rangeText = range && (
+    range.from_turn === range.to_turn ? (
+      <>Проверена реплика <TurnLink index={range.from_turn} onTurn={onTurn} /></>
+    ) : (
+      <>Проверены реплики <TurnLink index={range.from_turn} onTurn={onTurn} />–<TurnLink index={range.to_turn} onTurn={onTurn} /></>
+    )
+  );
+  if (!result.evidence.length && result.expected_at_turn === null && !range) return null;
+  return (
+    <div>
+      <p className="why__label">Основание</p>
+      {result.evidence.length > 0 && (
+        <div className="sources">
+          {result.evidence.map((item, position) => {
+            const speaker = turns.find((turn) => turn.index === item.turn_index)?.speaker;
+            return (
+              <button key={`${item.turn_index}-${position}`} type="button" className="source" onClick={() => onTurn(item.turn_index)}>
+                <span className="cite">{position + 1}</span>
+                <span className="source__turn">#{item.turn_index}</span>
+                <span className="source__quote">{speaker && `${speakerLabel(speaker)}: `}«{item.quote}»</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {result.expected_at_turn !== null && !result.evidence.length && (
+        <p className="why__small">Действие ожидалось в <TurnLink index={result.expected_at_turn} onTurn={onTurn} /></p>
+      )}
+      {rangeText && <p className="why__small mt-1">{rangeText}</p>}
+    </div>
+  );
+}
+
+type ImpactProps = { criterion: Criterion; result: CriterionResult; score?: CriterionScore; official: number | null; notApplicable: boolean };
+
+function Impact({ criterion, result, score, official, notApplicable }: ImpactProps) {
+  if (criterion.flag) {
+    return result.answer === 'yes' ? (
+      <>
+        <span className="impact__delta">Итог обнулён</span>
+        <p className="why__small">На экране итог равен 0. По чек-листу {fmtScore(official)}, так он уходит в экспорт.</p>
+      </>
+    ) : (
+      <p className="why__small">Нарушений нет, итог не меняется.</p>
+    );
+  }
+  if (!criterion.scored) return <p className="why__small">Без баллов, итог не меняется.</p>;
+  if (notApplicable) return <p className="why__small">Не считается: вес {fmtNumber(criterion.weight)} распределён между остальными критериями.</p>;
+  const effective = score?.effective_weight ?? null;
+  const points = score?.points ?? null;
+  if (effective === null || points === null) return <p className="why__small">Баллов нет: критерий не оценён.</p>;
+  const moved = Math.abs(effective - criterion.weight) > 0.005;
+  const lost = effective - points;
+  return (
+    <>
+      <span className="impact__value">{fmtScore(points)} из {fmtScore(effective)}</span>
+      {lost > 0.005 && <span className="impact__delta"> · −{fmtScore(lost)} к итогу</span>}
+      <div className="impact__meter"><span style={{ transform: `scaleX(${effective ? points / effective : 0})` }} /></div>
+      <p className="why__small">Вес {fmtNumber(criterion.weight)}{moved && ` → ${fmtScore(effective)} после исключения неприменимых`}</p>
+    </>
+  );
+}
+
+function Rule({ criterion, result, version }: { criterion: Criterion; result: CriterionResult; version: number }) {
+  const notApplicable = result.status === 'not_applicable';
+  return (
+    <div>
+      <p className="why__label">Правило листа, версия {version}</p>
+      {notApplicable ? (
+        <p className="why__small">Не применимо, когда: {criterion.na_when}</p>
+      ) : criterion.type === 'scale' ? (
+        <div className="ladder">
+          {criterion.levels.map((level) => (
+            <div key={level.value} className="ladder__step" data-on={result.answer === level.value || undefined}>
+              <span>{level.value}</span>
+              <span>{level.text}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="why__small">{criterion.flag ? '' : 'Да, когда: '}{criterion.yes_when}</p>
+      )}
+    </div>
   );
 }
 
 type DetailsProps = {
   run: EvaluationRun;
   criterion: Criterion;
+  turns: Turn[];
   appeals: Appeal[];
   onTurn: (turn: number) => void;
   onAppealChanged: () => void;
 };
 
-function Details({ run, criterion, appeals, onTurn, onAppealChanged }: DetailsProps) {
+function Details({ run, criterion, turns, appeals, onTurn, onAppealChanged }: DetailsProps) {
   const result = run.final_results.find((item) => item.criterion_id === criterion.id);
   const original = run.results.find((item) => item.criterion_id === criterion.id);
   const score = run.final_score.criteria.find((item) => item.criterion_id === criterion.id);
   if (!result) return null;
-  const notApplicable = result.status === 'not_applicable';
-  const range = result.reviewed_range;
-  const rangeText = range && (
-    <>
-      {range.from_turn === range.to_turn ? <>проверена <TurnLink index={range.from_turn} onTurn={onTurn} /></> : (
-        <>проверены <TurnLink index={range.from_turn} onTurn={onTurn} />–<TurnLink index={range.to_turn} onTurn={onTurn} /></>
-      )}
-    </>
-  );
-  const first = result.evidence[0];
   const flags = visibleFlags(result.review_flags);
-
   return (
     <div className="why">
-      <p className="why__text">{result.justification}</p>
-      {notApplicable ? (
-        <p className="why__small">Условие неприменимости выполнено</p>
-      ) : first ? (
-        <p className="why__small">
-          Основание: {result.evidence.length > 1 ? 'реплики' : 'реплика'}{' '}
-          {result.evidence.map((item, position) => (
-            <span key={`${item.turn_index}-${position}`}>
-              {position > 0 && ', '}
-              <TurnLink index={item.turn_index} onTurn={onTurn} />
-            </span>
-          ))}
-          {rangeText && <>, {rangeText}</>}
-        </p>
-      ) : result.expected_at_turn !== null ? (
-        <p className="why__small">
-          Действие ожидалось в <TurnLink index={result.expected_at_turn} onTurn={onTurn} />
-          {rangeText && <>, {rangeText}</>}
-        </p>
-      ) : (
-        rangeText && <p className="why__small">Основание: {rangeText}</p>
-      )}
-      <WeightLine criterion={criterion} score={score} notApplicable={notApplicable} />
-      {flags.map((flag) => <p key={flag} className="why__flag">{flag}</p>)}
-      <AppealBlock run={run} criterion={criterion} result={result} original={original} appeals={appeals} onChanged={onAppealChanged} />
+      <div className="why__main">
+        <div className="why__block" style={block(0)}>
+          <p className="why__label">Вывод</p>
+          <Conclusion result={result} onTurn={onTurn} />
+        </div>
+        <div className="why__block" style={block(1)}>
+          <Sources result={result} turns={turns} onTurn={onTurn} />
+        </div>
+        {flags.map((flag) => <p key={flag} className="why__flag why__block" style={block(2)}>{flag}</p>)}
+      </div>
+      <div className="why__side">
+        <div className="why__block" style={block(1)}>
+          <p className="why__label">Влияние на итог</p>
+          <Impact
+            criterion={criterion}
+            result={result}
+            score={score}
+            official={run.final_score.total ?? run.final_score.partial_total}
+            notApplicable={result.status === 'not_applicable'}
+          />
+        </div>
+        <div className="why__block" style={block(2)}>
+          <Rule criterion={criterion} result={result} version={run.checklist_version} />
+        </div>
+      </div>
+      <div className="why__appeal why__block" style={block(3)}>
+        <AppealBlock run={run} criterion={criterion} result={result} original={original} appeals={appeals} onChanged={onAppealChanged} />
+      </div>
     </div>
   );
 }
@@ -83,10 +200,18 @@ function sectionResult(section: SectionScore | undefined, incomplete: boolean): 
   return `${fmtScore(section.earned)} из ${fmtScore(section.possible)}${incomplete ? ' · неполно' : ''}`;
 }
 
+function Points({ score, criterion, result }: { score?: CriterionScore; criterion: Criterion; result?: CriterionResult }) {
+  if (criterion.flag) return <span className="crit__points">{result?.answer === 'yes' ? 'обнуляет итог' : 'без баллов'}</span>;
+  if (!criterion.scored) return <span className="crit__points">без баллов</span>;
+  if (score?.points === null || score?.points === undefined) return <span className="crit__points" />;
+  return <span className="crit__points"><b>{fmtScore(score.points)}</b> из {fmtScore(score.effective_weight)}</span>;
+}
+
 type Props = {
   checklist: ChecklistVersion;
   /** Null while the model is working: rows show placeholders. */
   run: EvaluationRun | null;
+  turns: Turn[];
   appeals: Appeal[];
   openId: string | null;
   reveal: boolean;
@@ -95,9 +220,18 @@ type Props = {
   onAppealChanged: () => void;
 };
 
-export function CriteriaList({ checklist, run, appeals, openId, reveal, onToggle, onTurn, onAppealChanged }: Props) {
-  let position = -1;
+export function CriteriaList({ checklist, run, turns, appeals, openId, reveal, onToggle, onTurn, onAppealChanged }: Props) {
+  const [folded, setFolded] = useState<Set<string>>(new Set());
   const missing = new Set(run?.final_score.missing_criteria ?? []);
+  let position = -1;
+
+  const toggleSection = (id: string) =>
+    setFolded((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+
   return (
     <>
       {checklist.sections.map((section) => {
@@ -105,49 +239,60 @@ export function CriteriaList({ checklist, run, appeals, openId, reveal, onToggle
         if (!criteria.length) return null;
         const score = run?.final_score.sections.find((item) => item.section_id === section.id);
         const incomplete = criteria.some((item) => missing.has(item.id));
+        // An open criterion keeps its section open: keys and links can land in a folded one.
+        const expanded = !folded.has(section.id) || criteria.some((item) => item.id === openId);
         return (
           <div key={section.id}>
-            <div className="csection">
+            <button type="button" className="csection" aria-expanded={expanded} onClick={() => toggleSection(section.id)}>
               <span>{section.title}</span>
-              {run && <span>{sectionResult(score, incomplete)}</span>}
-            </div>
-            {criteria.map((criterion) => {
-              position += 1;
-              const open = openId === criterion.id;
-              const result = run?.final_results.find((item) => item.criterion_id === criterion.id);
-              return (
-                <div key={criterion.id} className="crit" data-open={open || undefined}>
-                  <button
-                    type="button"
-                    className="crit__row"
-                    data-crit-row={criterion.id}
-                    aria-expanded={open}
-                    disabled={!run}
-                    onClick={() => onToggle(criterion.id)}
-                  >
-                    <span className="crit__title" title={criterion.title}>{criterion.title}</span>
-                    {result ? (
-                      <span className={reveal ? 'reveal' : undefined} style={{ '--i': position } as React.CSSProperties}>
-                        <AnswerBadge criterion={criterion} status={result.status} answer={result.answer} />
+              <span>{run ? sectionResult(score, incomplete) : ''}</span>
+              <Chevron />
+            </button>
+            <Collapse open={expanded}>
+              {criteria.map((criterion) => {
+                position += 1;
+                const open = openId === criterion.id;
+                const result = run?.final_results.find((item) => item.criterion_id === criterion.id);
+                const points = run?.final_score.criteria.find((item) => item.criterion_id === criterion.id);
+                return (
+                  <div key={criterion.id} className="crit" data-open={open || undefined}>
+                    <button
+                      type="button"
+                      className="crit__row"
+                      data-crit-row={criterion.id}
+                      aria-expanded={open}
+                      disabled={!run}
+                      onClick={() => onToggle(criterion.id)}
+                    >
+                      <span className="crit__title" title={criterion.title}>{criterion.title}</span>
+                      {run ? <Points score={points} criterion={criterion} result={result} /> : <span />}
+                      <span className="crit__answer">
+                        {result ? (
+                          <span className={reveal ? 'reveal' : undefined} style={block(position)}>
+                            <AnswerBadge criterion={criterion} status={result.status} answer={result.answer} />
+                          </span>
+                        ) : (
+                          !run && <span className="skeleton" aria-hidden />
+                        )}
                       </span>
-                    ) : (
-                      !run && <span className="skeleton" aria-hidden />
+                      {run ? <Chevron /> : <span />}
+                    </button>
+                    {run && (
+                      <Collapse open={open}>
+                        <Details
+                          run={run}
+                          criterion={criterion}
+                          turns={turns}
+                          appeals={appeals.filter((item) => item.criterion_id === criterion.id)}
+                          onTurn={onTurn}
+                          onAppealChanged={onAppealChanged}
+                        />
+                      </Collapse>
                     )}
-                  </button>
-                  {run && (
-                    <Collapse open={open}>
-                      <Details
-                        run={run}
-                        criterion={criterion}
-                        appeals={appeals.filter((item) => item.criterion_id === criterion.id)}
-                        onTurn={onTurn}
-                        onAppealChanged={onAppealChanged}
-                      />
-                    </Collapse>
-                  )}
-                </div>
-              );
-            })}
+                  </div>
+                );
+              })}
+            </Collapse>
           </div>
         );
       })}
