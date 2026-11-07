@@ -159,7 +159,10 @@ async def _ask_model(
         attempts[-1].errors.extend(current.problems)
         if report is None or len(current.hard_errors) <= len(report.hard_errors):
             report = current
-        if not current.problems:
+        # Only a broken contract earns a second call. Soft problems (a quote that is
+        # not verbatim, a missing justification) are already handled: the quote is
+        # dropped and flagged for the reviewer. Re-asking costs a full call for them.
+        if not current.hard_errors:
             break
         run_flags.append("contract_repair_used")
         user = prompt.user + _repair_note(current)

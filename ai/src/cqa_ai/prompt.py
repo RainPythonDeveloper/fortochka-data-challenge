@@ -91,7 +91,7 @@ def _reference_notes() -> str:
 @cache
 def prompt_version() -> str:
     """Changes whenever the fixed prompt text changes, which keeps caches honest."""
-    text = _ROLE + _VOICE_RULES + _NOTES_INTRO + _HINTS_INTRO + "facts-v3" + _reference_notes()
+    text = _ROLE + _VOICE_RULES + _NOTES_INTRO + _HINTS_INTRO + "facts-v4" + _reference_notes()
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
@@ -112,7 +112,7 @@ def build_prompt(
     user = (
         f"Канал: {snapshot.channel}. Язык: {snapshot.language}.\n\n"
         f"Служебные факты, вычисленные кодом:\n{render_facts(facts)}\n\n"
-        f"{_HINTS_INTRO}\n{render_hints(facts)}\n\n"
+        f"{_HINTS_INTRO}\n{render_hints(facts, snapshot.channel)}\n\n"
         f"<transcript>\n{transcript}\n</transcript>\n\n"
         "Оцени работу оператора по всем критериям рубрики."
     )

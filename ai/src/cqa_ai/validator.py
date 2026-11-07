@@ -77,7 +77,48 @@ def _match_quote(quote: str, text: str) -> str | None:
     if not pattern:
         return None
     found = re.search(pattern, text)
-    return found.group(0) if found else None
+    if found:
+        return found.group(0)
+    return _loose_match(quote, text)
+
+
+def _fold(char: str) -> str:
+    return "е" if char in "ёЁ" else char.lower()
+
+
+def _loose_match(quote: str, text: str) -> str | None:
+    """Ignore case, ё/е and punctuation, but return the original span of the turn.
+
+    Speech-recognition text has odd punctuation and casing that a model does not
+    copy exactly; the evidence shown is still the turn's own words.
+    """
+    def skeleton(value: str) -> tuple[str, list[int]]:
+        chars, positions = [], []
+        last_space = True
+        for position, char in enumerate(value):
+            if char.isalnum():
+                chars.append(_fold(char))
+                positions.append(position)
+                last_space = False
+            elif not last_space:
+                chars.append(" ")
+                positions.append(position)
+                last_space = True
+        return "".join(chars).strip(), positions
+
+    wanted, _ = skeleton(quote)
+    if len(wanted) < 8:  # too short to be sure it is the same words
+        return None
+    haystack, positions = skeleton(text)
+    start = haystack.find(wanted)
+    if start < 0:
+        return None
+    # `skeleton(text)` may start with a stripped space; realign by searching raw.
+    raw, _ = skeleton(text)
+    offset = len(raw) - len(raw.lstrip())
+    first = positions[start + offset]
+    last = positions[start + offset + len(wanted) - 1]
+    return text[first : last + 1]
 
 
 def _check_evidence(

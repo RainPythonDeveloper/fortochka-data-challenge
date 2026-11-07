@@ -290,8 +290,13 @@ def render_facts(facts: ConversationFacts) -> str:
     return "\n".join(f"- {line}" for line in lines)
 
 
-def render_hints(facts: ConversationFacts) -> str:
-    """Lexical observations. They can be wrong; the model must check the text."""
+def render_hints(facts: ConversationFacts, channel: str = "agent chat") -> str:
+    """Lexical observations. They can be wrong; the model must check the text.
+
+    In a call the text comes from speech recognition and the end event can sit
+    before the last lines, so a farewell the dictionary did not find says nothing:
+    only what was found is reported there.
+    """
     lines: list[str] = []
     if facts.first_operator_turn is not None:
         informal = ", неформальное" if facts.first_operator_greeting_informal else ""
@@ -327,7 +332,7 @@ def render_hints(facts: ConversationFacts) -> str:
                 + ", ".join(found)
                 + ". Итог разговора словарём не проверяется."
             )
-        else:
+        elif channel != "voice call":
             lines.append(
                 f"В последней реплике оператора [{facts.last_operator_turn}] словарь "
                 "не нашёл прощания."

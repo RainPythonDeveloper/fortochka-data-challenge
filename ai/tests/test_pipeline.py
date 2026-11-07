@@ -102,12 +102,21 @@ def test_fallback_is_not_used_when_the_main_model_answers(chat, checklist):
     assert [model for model, _ in provider.calls] == ["main"]
 
 
-def test_a_rejected_quote_triggers_one_repair(chat, checklist):
+def test_a_rejected_quote_is_dropped_and_flagged_without_a_second_call(chat, checklist):
     bad = model_reply(checklist, {"c01": {"evidence": [{"turn_index": 4, "quote": "нет такого"}]}})
     provider = FakeProvider(bad, model_reply(checklist))
     output = run(chat, checklist, provider)
-    assert len(provider.calls) == 2
-    assert output.results[0].evidence
+    assert len(provider.calls) == 1
+    c01 = output.results[0]
+    assert c01.evidence == [] and "evidence_rejected" in c01.review_flags
+    assert c01.answer == "yes"
+
+
+def test_a_quote_differing_only_in_case_and_punctuation_keeps_the_turn_words(chat, checklist):
+    loose = model_reply(checklist, {"c01": {"evidence": [{"turn_index": 4, "quote": "здравствуйте меня зовут анна"}]}})
+    output = run(chat, checklist, FakeProvider(loose))
+    c01 = output.results[0]
+    assert [e.quote for e in c01.evidence] == ["Здравствуйте, меня зовут Анна"]
 
 
 def test_missing_key_is_reported_as_not_configured(chat, checklist, monkeypatch):

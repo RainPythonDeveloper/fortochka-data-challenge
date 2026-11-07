@@ -94,3 +94,11 @@ def test_hold_turns_are_not_scanned_as_client_messages():
         )
     )
     assert facts.personal_contact_turns == []
+
+
+def test_missing_farewell_is_not_reported_for_calls():
+    facts = annotate(
+        snap(("00:00", "client", "Вопрос"), ("00:05", "operator", "Здравствуйте, я Ян. Ответ такой."))
+    )
+    assert "не нашёл прощания" in render_hints(facts)
+    assert "не нашёл прощания" not in render_hints(facts, "voice call")
