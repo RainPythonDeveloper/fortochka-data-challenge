@@ -1,0 +1,35 @@
+# Secrets: the API URL and audio_url values carry a signature
+.env
+.env.*
+!.env.example
+
+# Organizer materials: the guide PDF embeds the signed URL, the plan is internal
+*.pdf
+*.MP4
+*.mp4
+
+# Raw data: voice calls are real and contain unmasked personal data
+data/
+*.sqlite
+*.sqlite3
+*.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Local
+.DS_Store
+*.log
+
+# Local worktrees for parallel branches
+.worktrees/

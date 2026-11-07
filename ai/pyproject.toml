@@ -1,0 +1,24 @@
+[project]
+name = "cqa-ai"
+version = "0.1.0"
+description = "CQA evaluation core: contracts, rubric, scoring and the LLM pipeline"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cqa_ai"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
