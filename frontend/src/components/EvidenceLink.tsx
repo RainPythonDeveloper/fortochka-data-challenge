@@ -3,8 +3,8 @@ import { reducedMotion } from '../lib/motion';
 
 type Points = { x1: number; y1: number; x2: number; y2: number };
 
-const DRAW_DELAY = 450;
-const FOLLOW_MS = 800;
+const DRAW_DELAY = 600;
+const FOLLOW_MS = 1100;
 
 /** The part of an element's scrolling panel it can be seen in. */
 function isVisible(element: Element) {
@@ -85,13 +85,14 @@ export function EvidenceLink({ root, criterionId, turnIndex }: Props) {
   if (!points) return null;
   const { x1, y1, x2, y2 } = points;
   const bend = Math.max((x1 - x2) / 2, 12);
-  const path = `M ${x1} ${y1} C ${x1 - bend} ${y1}, ${x2 + bend} ${y2}, ${x2} ${y2}`;
+  // Drawn from the message outwards: the evidence is what leads to the criterion.
+  const path = `M ${x2} ${y2} C ${x2 + bend} ${y2}, ${x1 - bend} ${y1}, ${x1} ${y1}`;
   return (
     <svg className="link-layer" aria-hidden>
       <g className="link-layer__group" data-drawn={drawn || undefined}>
         <path className="link-layer__path" d={path} pathLength={1} />
-        <circle className="link-layer__dot" cx={x1} cy={y1} r={3} />
         <circle className="link-layer__dot" cx={x2} cy={y2} r={3} />
+        <circle className="link-layer__dot" data-end cx={x1} cy={y1} r={3} />
       </g>
     </svg>
   );

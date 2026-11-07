@@ -1,8 +1,7 @@
-import { Link, NavLink } from 'react-router-dom';
-import { USE_MOCKS } from '../api';
+import { NavLink, Link } from 'react-router-dom';
 import logo from '../assets/freedom-logo-white.svg';
 import { isActive, useJobs } from '../lib/jobs';
-import { MOCK_LABEL, NAV } from '../lib/labels';
+import { NAV } from '../lib/labels';
 import { Spinner } from './ui';
 
 export function AppBar() {
@@ -22,14 +21,11 @@ export function AppBar() {
           </NavLink>
         ))}
       </nav>
-      <div className="appbar__end">
-        {running > 0 && (
-          <Link to="/conversations" className="appbar__jobs">
-            <Spinner /> Оценивается: {running}
-          </Link>
-        )}
-        {USE_MOCKS && <span className="appbar__mock">{MOCK_LABEL}</span>}
-      </div>
+      {running > 0 && (
+        <Link to="/conversations" className="appbar__jobs">
+          <Spinner /> Оценивается: {running}
+        </Link>
+      )}
     </header>
   );
 }

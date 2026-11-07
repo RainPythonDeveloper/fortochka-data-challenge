@@ -19,7 +19,7 @@ export function Panel({ className = '', children, ...props }: React.HTMLAttribut
   );
 }
 
-export function Tag({ tone, children }: { tone?: 'amber'; children: ReactNode }) {
+export function Tag({ tone, children }: { tone?: 'amber' | 'bad'; children: ReactNode }) {
   return <span className="tag" data-tone={tone}>{children}</span>;
 }
 

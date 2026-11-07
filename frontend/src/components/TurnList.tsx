@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, type RefObject } from 'react';
-import type { Turn, TurnRange } from '../api/types';
+import type { Evidence, Turn, TurnRange } from '../api/types';
 import { reducedMotion } from '../lib/motion';
 
 const HOLD_END = ['больше не находится на удержании', 'no longer on hold'];
@@ -22,7 +22,21 @@ function heldTurns(turns: Turn[]): Set<number> {
   return held;
 }
 
-export type TurnFocus = { evidence: number[]; range: TurnRange | null; target: number | null; nonce: number };
+export type TurnFocus = { evidence: Evidence[]; range: TurnRange | null; target: number | null; nonce: number };
+
+/** The validator guarantees a quote is a substring of its turn, so it can be marked in place. */
+function Quoted({ text, quotes }: { text: string; quotes: string[] }) {
+  const quote = quotes.find((item) => item && text.includes(item));
+  if (!quote) return <>{text}</>;
+  const start = text.indexOf(quote);
+  return (
+    <>
+      {text.slice(0, start)}
+      <mark className="quote">{quote}</mark>
+      {text.slice(start + quote.length)}
+    </>
+  );
+}
 
 type Props = {
   turns: Turn[];
@@ -53,7 +67,8 @@ export function TurnList({ turns, isCall, focus, scroller }: Props) {
   return (
     <div ref={list} className="turns">
       {turns.map((turn) => {
-        const evidence = focus?.evidence.includes(turn.index) || undefined;
+        const quotes = focus?.evidence.filter((item) => item.turn_index === turn.index).map((item) => item.quote) ?? [];
+        const evidence = quotes.length > 0 || undefined;
         const range = focus?.range;
         const inRange = range && turn.index >= range.from_turn && turn.index <= range.to_turn;
         const tone = isCall && turn.speaker === 'client' && turn.index < firstOperator && isTone(turn.text);
@@ -62,14 +77,14 @@ export function TurnList({ turns, isCall, focus, scroller }: Props) {
           <div key={turn.index} className="turn" data-who={turn.speaker} data-range={inRange || undefined}>
             <span className="turn__n" title={turn.timestamp}>#{turn.index}</span>
             {turn.speaker === 'system' ? (
-              <span className="turn__system" data-turn-bubble={turn.index} data-evidence={evidence}>{turn.text}</span>
+              <span className="turn__system" data-turn-bubble={turn.index} data-evidence={evidence}><Quoted text={turn.text} quotes={quotes} /></span>
             ) : aside ? (
               <span className="turn__aside" data-turn-bubble={turn.index}>
-                {turn.text}
+                <Quoted text={turn.text} quotes={quotes} />
                 {held.has(turn.index) && <small>на удержании</small>}
               </span>
             ) : (
-              <span className="bubble" data-turn-bubble={turn.index} data-evidence={evidence}>{turn.text}</span>
+              <span className="bubble" data-turn-bubble={turn.index} data-evidence={evidence}><Quoted text={turn.text} quotes={quotes} /></span>
             )}
           </div>
         );

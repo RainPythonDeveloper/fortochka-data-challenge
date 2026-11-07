@@ -1,3 +1,4 @@
+import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../api';
 import type { ChecklistSummary, EvaluationRequest } from '../api/types';
@@ -67,7 +68,9 @@ export function RerunMenu({ conversationId, channel, label = 'Оценить з�
     <Menu
       popClass="rerun"
       trigger={({ open, toggle }) => (
-        <Button variant="text" aria-expanded={open} onClick={toggle}>{label}</Button>
+        <button type="button" className="icon-action" data-tone="go" aria-label={label} title={label} aria-expanded={open} onClick={toggle}>
+          <RefreshCw size={18} strokeWidth={1.75} />
+        </button>
       )}
     >
       {(close) => <Form conversationId={conversationId} channel={channel} close={close} />}

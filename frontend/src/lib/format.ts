@@ -35,6 +35,12 @@ export function plural(count: number, one: string, few: string, many: string): s
   return units >= 2 && units <= 4 ? few : many;
 }
 
+/** "10 баллов", "1 балл", "7,5 балла": a fraction always takes the genitive singular. */
+export function fmtPoints(value: number): string {
+  const word = Number.isInteger(value) ? plural(Math.abs(value), 'балл', 'балла', 'баллов') : 'балла';
+  return `${fmtNumber(value)} ${word}`;
+}
+
 const time = (date: Date) => date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
 export const fmtDate = (value: string) => {
@@ -112,6 +118,9 @@ export function flagText(flag: string): string | null {
 export const visibleFlags = (flags: string[]) => [
   ...new Set(flags.map(flagText).filter((text): text is string => Boolean(text))),
 ];
+
+export const speakerLabel = (speaker: string) =>
+  ({ operator: 'Оператор', client: 'Клиент', bot: 'Бот', system: 'Система' })[speaker] ?? speaker;
 
 export const STUB_FLAG = 'mock_provider';
 export const PERSONAL_DATA_FLAG = 'personal_data_not_sent';
