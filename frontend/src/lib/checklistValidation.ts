@@ -12,6 +12,9 @@ function checkCriterion(criterion: Criterion, sectionIds: Set<string>): string[]
   if (criterion.allow_na && !criterion.na_when?.trim()) issues.push('нужно условие «Когда не применимо»');
   if (!sectionIds.has(criterion.section)) issues.push('выберите существующую секцию');
 
+  if (criterion.type === 'boolean' && !criterion.yes_when?.trim()) issues.push('нужно условие «Когда «Да»»');
+  if (criterion.type === 'scale' && !criterion.prompt?.trim()) issues.push('нужна задача шкалы');
+
   if (criterion.type === 'scale') {
     const values = criterion.levels.map((level) => level.value);
     if (values.some((value) => !Number.isInteger(value))) issues.push('значение ступени должно быть целым');

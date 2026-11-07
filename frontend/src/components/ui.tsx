@@ -75,7 +75,7 @@ export function Swap({ id, align, children }: { id: string; align?: 'end'; child
 
   return (
     <span className="swap" data-align={align}>
-      {outgoing && <span key={`out-${outgoing.id}`} className="swap__item" data-state="out" aria-hidden>{outgoing.children}</span>}
+      {outgoing && <span key={`out-${outgoing.id}`} className="swap__item" data-state="out" inert>{outgoing.children}</span>}
       <span key={id} className="swap__item" data-state={outgoing ? 'in' : undefined}>{children}</span>
     </span>
   );
@@ -147,19 +147,30 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
   );
 }
 
-function useEscape(onClose: () => void) {
+/** Esc closes it. Focus moves in while it is open and returns to where it was. */
+function useDialog(onClose: () => void) {
+  const body = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && close.current();
+    const before = document.activeElement as HTMLElement | null;
+    body.current?.focus();
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      before?.focus?.();
+    };
+  }, []);
+  return body;
 }
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  useEscape(onClose);
+  const body = useDialog(onClose);
   return (
     <div className="modal" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={title} className="modal__body" onClick={(event) => event.stopPropagation()}>
+      <div ref={body} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className="modal__body" onClick={(event) => event.stopPropagation()}>
         {children}
       </div>
     </div>
@@ -167,12 +178,12 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 }
 
 export function Drawer({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  useEscape(onClose);
+  const body = useDialog(onClose);
   return (
     <div className="drawer" onClick={onClose}>
-      <aside role="dialog" aria-modal="true" aria-label={title} className="drawer__body" onClick={(event) => event.stopPropagation()}>
+      <div ref={body} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className="drawer__body" onClick={(event) => event.stopPropagation()}>
         {children}
-      </aside>
+      </div>
     </div>
   );
 }

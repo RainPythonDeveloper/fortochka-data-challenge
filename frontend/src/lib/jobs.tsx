@@ -24,10 +24,12 @@ const Context = createContext<JobsContext | null>(null);
 export const isActive = ({ job, pollError }: TrackedJob) =>
   !pollError && (job.status === 'queued' || job.status === 'running');
 
-export function progressFor(jobs: TrackedJob[], conversationId: string): Progress | null {
+/** `latestRunId` lets a dialogue that is done leave a batch that is still going. */
+export function progressFor(jobs: TrackedJob[], conversationId: string, latestRunId?: string | null): Progress | null {
   const tracked = jobs.find((item) => isActive(item) && item.conversationIds.includes(conversationId));
   if (!tracked) return null;
   const { job, startedAt } = tracked;
+  if (latestRunId && job.evaluation_ids.includes(latestRunId)) return null;
   if (!job.current) return { job, startedAt, stage: null };
   const running = job.current.find((item) => item.conversation_id === conversationId);
   return { job, startedAt, stage: running?.stage ?? 'queued' };
@@ -61,27 +63,25 @@ export function JobsProvider({ children }: { children: ReactNode }) {
   const jobsRef = useRef(jobs);
   jobsRef.current = jobs;
 
+  // Read once: the first write below would otherwise wipe what a reload has to restore.
+  const stored = useRef(readStored());
   useEffect(() => {
-    let live = true;
-    for (const item of readStored()) {
+    for (const item of stored.current) {
       api.getJob(item.id).then(
-        (job) => {
-          if (!live) return;
+        (job) =>
           setJobs((current) =>
             current.some((entry) => entry.job.id === job.id)
               ? current
               : [{ job, conversationIds: item.conversationIds, startedAt: item.startedAt, pollError: null }, ...current],
-          );
-        },
+          ),
         () => undefined,
       );
     }
-    return () => {
-      live = false;
-    };
   }, []);
 
-  useEffect(() => writeStored(jobs), [jobs]);
+  useEffect(() => {
+    if (jobs.length || !stored.current.length) writeStored(jobs);
+  }, [jobs]);
 
   useEffect(() => {
     if (!hasActive) return;

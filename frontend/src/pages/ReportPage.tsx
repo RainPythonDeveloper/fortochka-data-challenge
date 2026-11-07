@@ -2,9 +2,9 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import type { ReportBucket } from '../api/types';
 import { EmptyState, ErrorState, LoadingState, Panel } from '../components/ui';
-import { channelLabel, fmtDate, fmtDuration, languageLabel } from '../lib/format';
+import { channelLabel, fmtDate, fmtDuration, languageLabel, plural } from '../lib/format';
 import { useJobs } from '../lib/jobs';
-import { FROM_CACHE, MOCK_LABEL } from '../lib/labels';
+import { FROM_CACHE } from '../lib/labels';
 import { useAsync } from '../lib/useAsync';
 
 function BucketTable({ head, rows, label }: { head: string; rows: ReportBucket[]; label: (key: string) => string }) {
@@ -47,7 +47,7 @@ export function ReportPage() {
         {data && (
           <div className="stats">
             <span className="stat"><b>{data.evaluated}</b> из {data.conversations} оценено</span>
-            <span className="stat"><b>{data.failed}</b> сбоев</span>
+            <span className="stat"><b>{data.failed}</b> {plural(data.failed, 'сбой', 'сбоя', 'сбоев')}</span>
             <span className="stat"><b>{data.partial}</b> с частичным итогом</span>
           </div>
         )}
@@ -65,7 +65,7 @@ export function ReportPage() {
         <Panel><EmptyState title="Диалогов пока нет" /></Panel>
       ) : (
         <>
-          {data.mock_used && <p className="notice px-2" data-tone="warn">В выборке есть оценки на синтетических данных: {MOCK_LABEL.toLowerCase()} не показывают качество.</p>}
+          {data.mock_used && <p className="notice px-2" data-tone="warn">В выборке есть оценки на синтетических данных, они не показывают качество.</p>}
           <div className="report__grid">
             <Panel>
               <div className="panel-label">По языкам</div>

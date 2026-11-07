@@ -76,8 +76,14 @@ function ReviewView({ id }: { id: string }) {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
-  const progress = progressFor(jobs, id);
+  const progress = progressFor(jobs, id, conversation.data?.latest_evaluation_id);
   const running = Boolean(progress);
+  // In a batch this dialogue can finish long before the job does.
+  const landed = jobs.find((item) => item.conversationIds.includes(id))?.job.evaluation_ids.length ?? 0;
+  const reloadConversation = conversation.reload;
+  useEffect(() => {
+    if (landed) reloadConversation();
+  }, [landed, reloadConversation]);
   const runId = chosenRun ?? conversation.data?.latest_evaluation_id ?? null;
   const loaded = useAsync(() => (runId ? api.getEvaluation(runId) : Promise.resolve(null)), [runId, revision]);
   const appeals = useAsync(() => (runId ? api.listAppeals({ evaluation_id: runId }) : Promise.resolve([])), [runId, revision]);

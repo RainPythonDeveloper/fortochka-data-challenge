@@ -15,6 +15,7 @@ import {
   fmtNumber,
   fmtRelative,
   fmtScore,
+  plural,
   splitImportMessages,
 } from '../lib/format';
 import { isActive, progressFor, useJobs, type Progress } from '../lib/jobs';
@@ -371,7 +372,7 @@ export function ConversationsPage() {
   };
 
   const importMessages = imported ? splitImportMessages(imported.errors) : null;
-  const notEvaluated = rows.filter((row) => !row.latest_evaluation_id && !progressFor(jobs, row.id)).map((row) => row.id);
+  const notEvaluated = rows.filter((row) => !row.latest_evaluation_id && !progressFor(jobs, row.id, row.latest_evaluation_id)).map((row) => row.id);
   const navigate = useNavigate();
 
   return (
@@ -381,7 +382,7 @@ export function ConversationsPage() {
         <div className="stats">
           <span className="stat"><b>{report.data?.evaluated ?? '—'}</b> из {report.data?.conversations ?? '—'} оценено</span>
           <span className="stat"><b>{fmtNumber(average, 1)}</b> средний итог</span>
-          <span className="stat"><b data-tone="bad">{grossCount}</b> грубых нарушений</span>
+          <span className="stat"><b data-tone="bad">{grossCount}</b> {plural(grossCount, 'грубое нарушение', 'грубых нарушения', 'грубых нарушений')}</span>
         </div>
         <div className="head-row__end">
           <input
@@ -500,7 +501,7 @@ export function ConversationsPage() {
                 key={row.id}
                 row={row}
                 tab={tab}
-                progress={progressFor(jobs, row.id)}
+                progress={progressFor(jobs, row.id, row.latest_evaluation_id)}
                 finished={finished[row.id]}
                 entering={Date.now() - (fresh.get(row.id) ?? 0) < ENTER_MS}
                 onEvaluate={evaluate}

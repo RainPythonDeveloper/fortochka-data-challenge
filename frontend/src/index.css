@@ -457,6 +457,11 @@ label:has(input) {
   animation: fade-in 150ms ease both;
 }
 
+.modal__body:focus,
+.drawer__body:focus {
+  outline: none;
+}
+
 .modal__body {
   width: 100%;
   max-width: 880px;
