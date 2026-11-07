@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { Answer, Appeal, Criterion, CriterionResult, DecisionCreate, EvaluationRun } from '../api/types';
 import { host } from '../host/hostAdapter';
@@ -41,14 +41,26 @@ function changeChoices(criterion: Criterion, result: CriterionResult): Choice[] 
   return choices;
 }
 
-function SubmitAppeal({ run, criterion, onSaved }: { run: EvaluationRun; criterion: Criterion; onSaved: () => void }) {
+type SubmitProps = { run: EvaluationRun; criterion: Criterion; onSaved: () => void; openSignal?: number };
+
+function SubmitAppeal({ run, criterion, onSaved, openSignal = 0 }: SubmitProps) {
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The "Проверка человеком" button at the top of the criterion opens this form.
+  useEffect(() => {
+    if (openSignal) setOpen(true);
+  }, [openSignal]);
+
   if (!open) {
-    return <div><Button variant="text" onClick={() => setOpen(true)}>Оспорить оценку</Button></div>;
+    return (
+      <div className="appeal__start">
+        <Button onClick={() => setOpen(true)}>Оспорить оценку</Button>
+        <span className="why__small">Проверка человеком: проверяющий подтвердит или изменит ответ модели, итог пересчитается.</span>
+      </div>
+    );
   }
   const send = async () => {
     setBusy(true);
@@ -171,10 +183,11 @@ type Props = {
   original: CriterionResult | undefined;
   appeals: Appeal[];
   onChanged: () => void;
+  openSignal?: number;
 };
 
 /** Filing and deciding are two actions in one place: there are no accounts to separate them. */
-export function AppealBlock({ run, criterion, result, original, appeals, onChanged }: Props) {
+export function AppealBlock({ run, criterion, result, original, appeals, onChanged, openSignal }: Props) {
   const open = appeals.find((item) => item.status === 'open');
   const decided = [...appeals].reverse().find((item) => item.status === 'decided');
   if (run.status !== 'done') return null;
@@ -198,7 +211,7 @@ export function AppealBlock({ run, criterion, result, original, appeals, onChang
               <p className="why__small">Причина: {decided.decision.reason} · {decided.decision.reviewer}</p>
             </>
           ) : (
-            <SubmitAppeal run={run} criterion={criterion} onSaved={onChanged} />
+            <SubmitAppeal run={run} criterion={criterion} onSaved={onChanged} openSignal={openSignal} />
           )}
         </div>
       </Swap>

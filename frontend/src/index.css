@@ -2611,3 +2611,39 @@ mark.quote {
   color: var(--color-text);
   font-style: italic;
 }
+
+/* Human review: visible entry point at the top of an opened criterion */
+.human-review {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line, rgba(0, 0, 0, 0.08));
+  border-radius: 8px;
+  background: var(--color-surface-2, rgba(0, 0, 0, 0.03));
+}
+.human-review__text {
+  color: var(--color-ink);
+  font-size: var(--text-meta);
+  font-weight: 500;
+}
+.appeal__start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.crit__review {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--color-amber-bg, #fff4d6);
+  color: var(--color-amber-text);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}

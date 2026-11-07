@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react';
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type {
   Appeal,
   ChecklistVersion,
@@ -13,7 +13,7 @@ import type {
 import { fmtNumber, fmtScore, ruleText, speakerLabel, visibleFlags } from '../lib/format';
 import { AnswerBadge } from './AnswerBadge';
 import { AppealBlock } from './AppealBlock';
-import { Collapse } from './ui';
+import { Button, Collapse } from './ui';
 
 const Chevron = () => <ChevronDown className="chevron" size={16} strokeWidth={1.75} aria-hidden />;
 
@@ -210,14 +210,44 @@ type DetailsProps = {
   onAppealChanged: () => void;
 };
 
+/** The system itself doubts this answer: low confidence or a code fact contradicting it. */
+function needsReview(result: CriterionResult | undefined): boolean {
+  if (!result) return false;
+  return result.review_flags.some((flag) => flag === 'low_confidence' || flag === 'code_hint_conflict');
+}
+
 function Details({ run, criterion, turns, appeals, onTurn, onAppealChanged }: DetailsProps) {
+  const [appealSignal, setAppealSignal] = useState(0);
+  const appealRef = useRef<HTMLDivElement>(null);
   const result = run.final_results.find((item) => item.criterion_id === criterion.id);
   const original = run.results.find((item) => item.criterion_id === criterion.id);
   const score = run.final_score.criteria.find((item) => item.criterion_id === criterion.id);
   if (!result) return null;
   const flags = visibleFlags(result.review_flags);
+  const openAppeal = appeals.find((item) => item.status === 'open');
+  const decided = appeals.some((item) => item.status === 'decided');
+  const review = () => {
+    setAppealSignal((value) => value + 1);
+    requestAnimationFrame(() => appealRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  };
   return (
     <div className="why">
+      {run.status === 'done' && (
+        <div className="human-review" style={block(0)}>
+          <span className="human-review__text">
+            {openAppeal
+              ? 'Апелляция ждёт решения проверяющего'
+              : decided
+                ? 'Проверено человеком'
+                : needsReview(result)
+                  ? 'Система не уверена в этом ответе: стоит проверить'
+                  : 'Не согласны с ответом модели?'}
+          </span>
+          <Button variant={openAppeal || needsReview(result) ? 'primary' : undefined} onClick={review}>
+            {openAppeal ? 'Принять решение' : decided ? 'Показать решение' : 'Проверка человеком'}
+          </Button>
+        </div>
+      )}
       <div className="why__main">
         <div className="why__block" style={block(0)}>
           <p className="why__label">Вывод</p>
@@ -246,8 +276,16 @@ function Details({ run, criterion, turns, appeals, onTurn, onAppealChanged }: De
           <Rule criterion={criterion} result={result} version={run.checklist_version} />
         </div>
       </div>
-      <div className="why__appeal why__block" style={block(3)}>
-        <AppealBlock run={run} criterion={criterion} result={result} original={original} appeals={appeals} onChanged={onAppealChanged} />
+      <div ref={appealRef} className="why__appeal why__block" style={block(3)}>
+        <AppealBlock
+          run={run}
+          criterion={criterion}
+          result={result}
+          original={original}
+          appeals={appeals}
+          onChanged={onAppealChanged}
+          openSignal={appealSignal}
+        />
       </div>
     </div>
   );
@@ -322,7 +360,10 @@ export function CriteriaList({ checklist, run, turns, appeals, openId, reveal, o
                       disabled={!run}
                       onClick={() => onToggle(criterion.id)}
                     >
-                      <span className="crit__title" title={criterion.title}>{criterion.title}</span>
+                      <span className="crit__title" title={criterion.title}>
+                        {criterion.title}
+                        {needsReview(result) && <span className="crit__review" title="Система не уверена: стоит проверить человеком">проверить</span>}
+                      </span>
                       {run ? <Points score={points} criterion={criterion} result={result} /> : <span />}
                       <span className="crit__answer">
                         {result ? (
