@@ -49,12 +49,14 @@ def effective_notes(criterion: Criterion) -> list[str]:
 
     Default notes follow the official meaning. When a criterion is reworded they
     are dropped even if an editor copied them along, while notes a person wrote
-    for the new wording are kept and come last, so they can override.
+    for the new wording are kept and come last, so they can override. A note in
+    `disabled_notes` is out either way: that is the only way to switch off a default.
     """
     by_meaning, every_note = _default_notes()
     inherited = list(by_meaning.get(meaning_fingerprint(criterion), ()))
     own = [note for note in criterion.team_notes if note not in every_note]
-    return inherited + own
+    disabled = set(criterion.disabled_notes)
+    return [note for note in inherited + own if note not in disabled]
 
 
 def allowed_answers(criterion: Criterion) -> list[str]:
