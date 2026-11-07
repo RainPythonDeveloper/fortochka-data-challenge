@@ -44,6 +44,7 @@ class ControlOptions:
     group_id: str
     expected_records: int = 10
     checklist_id: str | None = None
+    checklists_by_channel: dict[str, str] | None = None
     max_retries: int = 2
     retry_delay_s: float = 30
     out_dir: Path | None = None
@@ -215,6 +216,7 @@ async def run_control(
             EvaluationRequest(
                 conversation_ids=pending,
                 checklist_id=options.checklist_id,
+                checklists_by_channel=options.checklists_by_channel,
                 force=options.force and attempt == 0,
             )
         )
@@ -265,12 +267,28 @@ def parse_args(argv: list[str] | None = None) -> ControlOptions:
     parser.add_argument("--group-id", required=True)
     parser.add_argument("--expected-records", type=int, default=10)
     parser.add_argument("--checklist-id", help="по умолчанию чек-лист выбирается по каналу")
+    parser.add_argument(
+        "--checklist-for",
+        action="append",
+        metavar="КАНАЛ=ID",
+        help="чек-лист для канала, можно повторять: --checklist-for 'voice call=<id>'",
+    )
     parser.add_argument("--max-retries", type=int, default=2)
     parser.add_argument("--retry-delay", type=float, default=30, dest="retry_delay_s")
     parser.add_argument("--out-dir", type=Path, help="по умолчанию data/control/<группа>-<время>")
     parser.add_argument("--force", action="store_true", help="не брать результаты из кэша")
     parser.add_argument("--allow-mock", action="store_true", help="разрешить заглушку")
-    return ControlOptions(**vars(parser.parse_args(argv)))
+    values = vars(parser.parse_args(argv))
+    pairs = values.pop("checklist_for") or []
+    if pairs and values["checklist_id"]:
+        parser.error("--checklist-for нельзя сочетать с --checklist-id")
+    assigned: dict[str, str] = {}
+    for pair in pairs:
+        channel, separator, checklist_id = pair.partition("=")
+        if not separator or not channel.strip() or not checklist_id.strip():
+            parser.error(f"--checklist-for ждёт КАНАЛ=ID, получено {pair!r}")
+        assigned[channel.strip()] = checklist_id.strip()
+    return ControlOptions(**values, checklists_by_channel=assigned or None)
 
 
 def main(argv: list[str] | None = None) -> int:

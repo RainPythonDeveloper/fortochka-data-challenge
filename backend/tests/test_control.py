@@ -6,15 +6,18 @@ import httpx
 import pytest
 from conftest import AUDIO_URL, CountingEvaluator, make_payload, make_record
 
+from cqa_backend import checklists
 from cqa_backend.control import (
     ControlError,
     ControlOptions,
     check_outside_git,
     format_report,
     main,
+    parse_args,
     run_control,
 )
 from cqa_backend.db import Database
+from cqa_backend.errors import ApiError
 
 IDS = [f"ctl-{index:02d}" for index in range(10)]
 
@@ -150,6 +153,52 @@ def test_cost_is_summed_over_retries(settings, tmp_path):
     assert report.ok and report.cost_usd == pytest.approx(1.0)
     assert report.runs == 11 and report.runs_without_cost == 1
     assert "без учёта 1" in format_report(report)
+
+
+def add_checklist(settings, checklist_id, channels):
+    db = Database(settings.cqa_db_path)
+    checklists.seed_defaults(db)
+    body = checklists.list_checklists(db)[0].checklist_id
+    base = checklists.get_checklist(db, body).model_dump(mode="json")
+    checklists.create_checklist(db, {**base, "checklist_id": checklist_id, "channels": channels})
+
+
+def test_mixed_channels_with_assignment_and_report(settings, tmp_path):
+    add_checklist(settings, "voice-a", ["voice call"])
+    add_checklist(settings, "voice-b", ["voice call"])
+    records = [make_record("chat"), make_record("call", channel="voice call")]
+    opts = options(
+        tmp_path, expected_records=2, checklists_by_channel={"voice call": "voice-b"}
+    )
+
+    report = control(settings, opts, records)
+
+    assert report.ok
+    assert report.checklists == ["freedom-chat-quality v1", "voice-b v1"]
+    assert "voice-b v1" in format_report(report)
+
+
+def test_ambiguous_channel_stops_the_run_with_a_clear_reason(settings, tmp_path):
+    add_checklist(settings, "voice-a", ["voice call"])
+    add_checklist(settings, "voice-b", ["voice call"])
+    records = [make_record("call", channel="voice call")]
+    with pytest.raises(ApiError, match="checklists_by_channel"):
+        control(settings, options(tmp_path, expected_records=1), records)
+
+
+def test_checklist_for_argument():
+    parsed = parse_args(
+        ["--group-id", "G", "--checklist-for", "voice call=v=1", "--checklist-for", "agent chat=c"]
+    )
+    assert parsed.checklists_by_channel == {"voice call": "v=1", "agent chat": "c"}
+    assert parse_args(["--group-id", "G"]).checklists_by_channel is None
+    for bad in (
+        ["--checklist-for", "voice call"],
+        ["--checklist-for", "=x"],
+        ["--checklist-for", "a=b", "--checklist-id", "c"],
+    ):
+        with pytest.raises(SystemExit):
+            parse_args(["--group-id", "G", *bad])
 
 
 def test_out_dir_inside_git_is_refused(tmp_path):

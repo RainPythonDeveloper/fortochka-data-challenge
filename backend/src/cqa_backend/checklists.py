@@ -78,14 +78,32 @@ def get_checklist(db: Database, checklist_id: str, version: int | None = None) -
     return ChecklistVersion.model_validate_json(row["body_json"])
 
 
-def latest_by_channel(db: Database) -> dict[str, ChecklistVersion]:
-    """Channel to checklist, from the latest versions only. If several checklists
-    claim a channel, the first `checklist_id` in sort order wins, so a choice is stable."""
-    choice: dict[str, ChecklistVersion] = {}
+def choose_by_channel(
+    db: Database, channels: set[str], assigned: dict[str, str] | None = None
+) -> dict[str, ChecklistVersion]:
+    """Latest version per channel. An explicit assignment wins, then the only claimant,
+    then the standard checklist among several. A channel nobody claims stays absent,
+    its dialogues fail alone. Several claimants without a standard one are an error:
+    a user checklist must never silently replace the rubric of a channel."""
+    assigned = assigned or {}
+    # All assigned ids are read, so a typo is a 404 even for a channel not in this batch.
+    choice = {channel: get_checklist(db, item) for channel, item in assigned.items()}
+    claims: dict[str, list[str]] = {}
     for summary in list_checklists(db):
         for channel in summary.channels:
-            if channel not in choice:
-                choice[channel] = get_checklist(db, summary.checklist_id)
+            claims.setdefault(channel, []).append(summary.checklist_id)
+    standard = {item.checklist_id for item in load_default_checklists()}
+    for channel in sorted(channels - set(choice)):
+        claimants = claims.get(channel, [])
+        narrowed = [item for item in claimants if item in standard] or claimants
+        if len(narrowed) > 1:
+            raise ApiError(
+                422,
+                f"Канал {channel!r} заявлен в нескольких чек-листах: {', '.join(narrowed)}. "
+                "Укажите checklist_id или checklists_by_channel",
+            )
+        if narrowed:
+            choice[channel] = get_checklist(db, narrowed[0])
     return choice
 
 

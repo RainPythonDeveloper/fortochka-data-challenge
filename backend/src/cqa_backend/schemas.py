@@ -3,7 +3,7 @@
 No model here has an `audio_url` field, so it cannot reach a JSON response.
 Additions to the contract: `error` on evaluations, `warnings` on POST /transcripts,
 `cached_from` and `evaluator` in the run log, optional `checklist_id` in
-EvaluationRequest, null `checklist` on a run that had no checklist for its channel,
+EvaluationRequest, `checklists_by_channel` there, null `checklist` on a run that had no checklist for its channel,
 POST /checklists, `evaluation_id` in GET /appeals, GET /reports/summary and
 GET /evaluations/compare.
 """
@@ -66,6 +66,7 @@ class ChecklistSummary(BaseModel):
 class EvaluationRequest(BaseModel):
     conversation_ids: list[NonEmpty] = Field(min_length=1)
     checklist_id: str | None = None  # empty: chosen per dialogue by its channel
+    checklists_by_channel: dict[str, str] | None = None  # channels left out are chosen as above
     version: int | None = None
     force: bool = False
 

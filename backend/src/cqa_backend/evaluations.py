@@ -30,7 +30,7 @@ from cqa_ai.contracts import (
 )
 from pydantic import ValidationError
 
-from cqa_backend.checklists import get_checklist, latest_by_channel
+from cqa_backend.checklists import choose_by_channel, get_checklist
 from cqa_backend.config import Settings, resolve_evaluator_config
 from cqa_backend.db import Database, now_iso
 from cqa_backend.errors import ApiError, describe_validation
@@ -95,16 +95,11 @@ class EvaluationService:
     def create_job(self, request: EvaluationRequest) -> Job:
         if request.checklist_id is None and request.version is not None:
             raise ApiError(422, "Поле version требует checklist_id")
-        explicit = (
-            get_checklist(self.db, request.checklist_id, request.version)
-            if request.checklist_id
-            else None
-        )
-        by_channel = {} if explicit else latest_by_channel(self.db)
+        if request.checklist_id and request.checklists_by_channel is not None:
+            raise ApiError(422, "Укажите либо checklist_id, либо checklists_by_channel")
         conversation_ids = list(dict.fromkeys(request.conversation_ids))
-        job_id = str(uuid.uuid4())
-        with self.db.tx() as conn:
-            marks = ",".join("?" * len(conversation_ids))
+        marks = ",".join("?" * len(conversation_ids))
+        with self.db.read() as conn:
             known = {
                 row["id"]: row["channel"]
                 for row in conn.execute(
@@ -112,9 +107,21 @@ class EvaluationService:
                     conversation_ids,
                 )
             }
-            unknown = [item for item in conversation_ids if item not in known]
-            if unknown:
-                raise ApiError(404, f"Диалоги не найдены: {redact(', '.join(unknown))[:300]}")
+        unknown = [item for item in conversation_ids if item not in known]
+        if unknown:
+            raise ApiError(404, f"Диалоги не найдены: {redact(', '.join(unknown))[:300]}")
+        explicit = (
+            get_checklist(self.db, request.checklist_id, request.version)
+            if request.checklist_id
+            else None
+        )
+        by_channel = (
+            {}
+            if explicit
+            else choose_by_channel(self.db, set(known.values()), request.checklists_by_channel)
+        )
+        job_id = str(uuid.uuid4())
+        with self.db.tx() as conn:
             conn.execute(
                 "INSERT INTO jobs VALUES (?, 'queued', ?, ?, ?, NULL, ?)",
                 (
