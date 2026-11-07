@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import type { Appeal, ResultStatus } from '../api/types';
 import { EmptyState, ErrorState, LoadingState, Panel } from '../components/ui';
@@ -36,7 +36,11 @@ function link(appeal: Appeal): string {
 /** The reviewer's queue: every appeal with its context, open ones first. */
 export function AppealsPage() {
   const { revision } = useJobs();
-  const [filter, setFilter] = useState<Filter>('open');
+  const [params] = useSearchParams();
+  const requested = params.get('tab');
+  const [filter, setFilter] = useState<Filter>(
+    requested === 'decided' || requested === 'all' ? requested : 'open',
+  );
   const appeals = useAsync(() => api.listAppeals(), [revision]);
   const all = appeals.data ?? [];
   const shown = all.filter((item) => filter === 'all' || item.status === filter);

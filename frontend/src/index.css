@@ -2749,3 +2749,11 @@ mark.quote {
   background: var(--color-green-bg, #e6f4ea);
   color: var(--color-green-text, #1f6b43);
 }
+.appeals-table td,
+.appeals-table th {
+  padding-right: 14px;
+  vertical-align: top;
+}
+.appeal-link {
+  white-space: nowrap;
+}
