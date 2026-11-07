@@ -2647,3 +2647,76 @@ mark.quote {
   font-weight: 600;
   vertical-align: middle;
 }
+
+/* Human review entry point next to the score */
+.rhead__score {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.hr-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hr-trigger__count {
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.22);
+  font-size: 12px;
+  font-weight: 500;
+}
+.btn[data-variant='secondary'] .hr-trigger__count {
+  background: var(--color-surface-2, rgba(0, 0, 0, 0.05));
+}
+.hr-menu {
+  width: min(440px, calc(100vw - 32px));
+}
+.hr-list {
+  display: grid;
+  gap: 2px;
+}
+.hr-list__intro {
+  margin: 2px 4px 6px;
+  color: var(--color-text);
+  font-size: var(--text-meta);
+  line-height: 1.45;
+}
+.hr-list__row {
+  display: grid !important;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 10px;
+}
+.hr-list__title {
+  overflow: hidden;
+  color: var(--color-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hr-list__state {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.hr-list__state[data-state='waiting'],
+.hr-list__state[data-state='doubt'] {
+  background: var(--color-amber-bg, #fff4d6);
+  color: var(--color-amber-text);
+}
+.hr-list__state[data-state='checked'] {
+  background: var(--color-green-bg, #e6f4ea);
+  color: var(--color-green-text, #1f6b43);
+}
+@media (max-width: 900px) {
+  .rhead__score {
+    align-items: flex-start;
+    width: 100%;
+  }
+}

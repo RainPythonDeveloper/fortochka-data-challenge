@@ -10,6 +10,7 @@ import { EvidenceLink } from '../components/EvidenceLink';
 import { RerunMenu } from '../components/RerunMenu';
 import { RunLogPanel } from '../components/RunLogPanel';
 import { ScoreBreakdown } from '../components/ScoreBreakdown';
+import { HumanReviewMenu } from '../components/HumanReviewMenu';
 import { ScoreBlock } from '../components/ScoreBlock';
 import { StageRail } from '../components/StageRail';
 import { TurnList, type TurnFocus } from '../components/TurnList';
@@ -74,6 +75,7 @@ function ReviewView({ id }: { id: string }) {
   const history = useAsync(() => api.listEvaluations(id), [id, revision]);
   const [chosenRun, setChosenRun] = useState<string | null>(params.get('run'));
   const [openId, setOpenId] = useState<string | null>(params.get('criterion'));
+  const [reviewRequest, setReviewRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [turnJump, setTurnJump] = useState<{ turn: number; nonce: number } | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -252,7 +254,21 @@ function ReviewView({ id }: { id: string }) {
           </div>
           <StageRail run={run} progress={progress ?? (awaiting ? lastProgress.current : null)} onOpenLog={() => setShowLog(true)} />
         </div>
-        <ScoreBlock run={run} running={busy} reveal={reveal} />
+        <div className="rhead__score">
+          <ScoreBlock run={run} running={busy} reveal={reveal} />
+          {shownRun?.status === 'done' && shownRun.checklist && (
+            <HumanReviewMenu
+              run={shownRun}
+              checklist={shownRun.checklist}
+              appeals={(appeals.data ?? []).filter((item) => item.evaluation_id === runId)}
+              onPick={(criterionId) => {
+                setTurnJump(null);
+                setOpenId(criterionId);
+                setReviewRequest((current) => ({ id: criterionId, nonce: (current?.nonce ?? 0) + 1 }));
+              }}
+            />
+          )}
+        </div>
       </Panel>
 
       <div ref={columns} className="review-cols">
@@ -284,6 +300,7 @@ function ReviewView({ id }: { id: string }) {
                       turns={detail.turns}
                       appeals={(appeals.data ?? []).filter((item) => item.evaluation_id === runId)}
                       openId={openId}
+                      reviewRequest={reviewRequest}
                       reveal={reveal}
                       onToggle={toggle}
                       onTurn={(turn) => setTurnJump((current) => ({ turn, nonce: (current?.nonce ?? 0) + 1 }))}

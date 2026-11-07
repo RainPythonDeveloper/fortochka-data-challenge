@@ -1,5 +1,5 @@
 import { ChevronDown } from 'lucide-react';
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type {
   Appeal,
   ChecklistVersion,
@@ -202,6 +202,7 @@ function Trace({ result, criterion }: { result: CriterionResult; criterion: Crit
 }
 
 type DetailsProps = {
+  reviewNonce?: number;
   run: EvaluationRun;
   criterion: Criterion;
   turns: Turn[];
@@ -211,14 +212,24 @@ type DetailsProps = {
 };
 
 /** The system itself doubts this answer: low confidence or a code fact contradicting it. */
-function needsReview(result: CriterionResult | undefined): boolean {
+export function needsReview(result: CriterionResult | undefined): boolean {
   if (!result) return false;
   return result.review_flags.some((flag) => flag === 'low_confidence' || flag === 'code_hint_conflict');
 }
 
-function Details({ run, criterion, turns, appeals, onTurn, onAppealChanged }: DetailsProps) {
+function Details({ run, criterion, turns, appeals, onTurn, onAppealChanged, reviewNonce = 0 }: DetailsProps) {
   const [appealSignal, setAppealSignal] = useState(0);
   const appealRef = useRef<HTMLDivElement>(null);
+  // "Проверка человеком" next to the score asked for this criterion: open the form
+  // once the row has unfolded and bring it into view.
+  useEffect(() => {
+    if (!reviewNonce) return;
+    const timer = setTimeout(() => {
+      setAppealSignal((value) => value + 1);
+      appealRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [reviewNonce]);
   const result = run.final_results.find((item) => item.criterion_id === criterion.id);
   const original = run.results.find((item) => item.criterion_id === criterion.id);
   const score = run.final_score.criteria.find((item) => item.criterion_id === criterion.id);
@@ -304,6 +315,8 @@ function Points({ score, criterion, result }: { score?: CriterionScore; criterio
 }
 
 type Props = {
+  /** A request from the page to open the review form of one criterion. */
+  reviewRequest?: { id: string; nonce: number } | null;
   checklist: ChecklistVersion;
   /** Null while the model is working: rows show placeholders. */
   run: EvaluationRun | null;
@@ -316,7 +329,7 @@ type Props = {
   onAppealChanged: () => void;
 };
 
-export function CriteriaList({ checklist, run, turns, appeals, openId, reveal, onToggle, onTurn, onAppealChanged }: Props) {
+export function CriteriaList({ checklist, run, turns, appeals, openId, reveal, onToggle, onTurn, onAppealChanged, reviewRequest }: Props) {
   const [folded, setFolded] = useState<Set<string>>(new Set());
   const missing = new Set(run?.final_score.missing_criteria ?? []);
   let position = -1;
@@ -379,6 +392,7 @@ export function CriteriaList({ checklist, run, turns, appeals, openId, reveal, o
                     {run && (
                       <Collapse open={open}>
                         <Details
+                          reviewNonce={reviewRequest?.id === criterion.id ? reviewRequest.nonce : 0}
                           run={run}
                           criterion={criterion}
                           turns={turns}
