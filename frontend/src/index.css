@@ -1,0 +1,44 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-brand-50: #eef6f1;
+  --color-brand-100: #d7eadf;
+  --color-brand-200: #afd4bf;
+  --color-brand-500: #2f7d57;
+  --color-brand-700: #1a5a3c;
+  --color-brand-800: #14482f;
+  --color-brand-900: #0f3825;
+  --color-page: #f5f6f3;
+  --color-line: #dfe3dc;
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-page);
+  color: #1d2520;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+button:not(:disabled),
+summary,
+select,
+label:has(input) {
+  cursor: pointer;
+}
+
+@keyframes turn-flash {
+  from {
+    background-color: #fcd34d;
+  }
+}
+
+.turn-flash {
+  animation: turn-flash 1.2s ease-out;
+}
