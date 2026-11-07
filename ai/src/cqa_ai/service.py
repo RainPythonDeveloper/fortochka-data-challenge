@@ -1,13 +1,10 @@
-"""Public entry points used by the backend. Their signatures are the contract.
-
-`evaluate` is a stub at this point: it only knows the mock provider, so the
-backend and the UI can be built before the real pipeline lands on `feat/ai`.
-"""
+"""Public entry points used by the backend. Their signatures are the contract."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 from importlib import resources
 from typing import Any
 
@@ -24,8 +21,14 @@ from cqa_ai.contracts import (
     ReviewStatus,
     Turn,
 )
+from cqa_ai.pipeline import run_single
+from cqa_ai.providers import get_provider, missing_key
 
 _KNOWN_RECORD_FIELDS = {"conversation_id", "channel", "language", "transcript", "audio_url"}
+# Real calls hold personal data, and NVIDIA's free endpoints record their input and
+# ask not to send personal data. Sending a call is therefore an explicit decision.
+_PERSONAL_DATA_CHANNELS = {"voice call"}
+_ALLOW_PERSONAL_DATA = "CQA_ALLOW_VOICE_TO_CLOUD"
 
 
 class EvaluatorNotConfigured(RuntimeError):
@@ -109,18 +112,54 @@ def _mock_results(
     return results
 
 
+def _blocked(checklist: ChecklistVersion, config: EvaluatorConfig) -> EvaluationOutput:
+    reason = (
+        "Звонок не отправлен в модель: в нём есть персональные данные, а бесплатный API "
+        f"записывает запросы. Разрешить отправку можно настройкой {_ALLOW_PERSONAL_DATA}=1."
+    )
+    return EvaluationOutput(
+        results=[
+            CriterionResult(
+                criterion_id=criterion.id,
+                status=ResultStatus.FAILED,
+                justification=reason,
+                review_flags=["personal_data_not_sent"],
+            )
+            for criterion in checklist.criteria
+        ],
+        pipeline=config.pipeline,
+        review_status=ReviewStatus.FLAGGED,
+        review_reasons=["personal_data_not_sent"],
+    )
+
+
 async def evaluate(
     snapshot: ConversationSnapshot,
     checklist: ChecklistVersion,
     config: EvaluatorConfig | None = None,
 ) -> EvaluationOutput:
     config = config or EvaluatorConfig()
-    if config.provider != "mock":
-        raise EvaluatorNotConfigured(f"provider {config.provider!r} is not available yet")
-    return EvaluationOutput(
-        results=_mock_results(snapshot, checklist),
-        attempts=[ModelAttempt(provider="mock", model="mock", valid=True)],
-        pipeline=config.pipeline,
-        review_status=ReviewStatus.FLAGGED,
-        review_reasons=["mock_provider"],
-    )
+    if config.provider == "mock":
+        return EvaluationOutput(
+            results=_mock_results(snapshot, checklist),
+            attempts=[ModelAttempt(provider="mock", model="mock", valid=True)],
+            pipeline=config.pipeline,
+            review_status=ReviewStatus.FLAGGED,
+            review_reasons=["mock_provider"],
+        )
+
+    variable = missing_key(config.provider)
+    if variable:
+        raise EvaluatorNotConfigured(f"Оценщик не настроен: не задан {variable}")
+    try:
+        provider = get_provider(config.provider)
+    except ValueError as error:
+        raise EvaluatorNotConfigured(str(error)) from error
+
+    if snapshot.channel in _PERSONAL_DATA_CHANNELS and os.environ.get(_ALLOW_PERSONAL_DATA) != "1":
+        return _blocked(checklist, config)
+    if config.fallback_model is None:
+        config = config.model_copy(
+            update={"fallback_model": os.environ.get("LLM_FALLBACK_MODEL") or None}
+        )
+    return await run_single(snapshot, checklist, config, provider)

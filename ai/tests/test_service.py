@@ -31,6 +31,7 @@ def test_default_checklist_matches_the_official_weights():
     assert len(checklist.criteria) == 8
     assert sum(c.weight for c in checklist.criteria) == 100
     assert [c.id for c in checklist.criteria if c.allow_na] == ["c02", "c03", "c04", "c07"]
+    assert checklist.channels == ["agent chat"]
     gross = next(c for c in checklist.criteria if c.id == "c08")
     assert gross.weight == 0 and not gross.scored and gross.flag == "gross_error"
 

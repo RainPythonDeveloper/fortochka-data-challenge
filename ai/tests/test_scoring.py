@@ -78,6 +78,14 @@ def test_failed_criterion_is_not_a_zero_and_not_na():
     assert score.partial_total == pytest.approx(69.23)
 
 
+def test_nothing_assessed_gives_no_partial_total_that_looks_like_zero():
+    results = [
+        CriterionResult(criterion_id=c.id, status=ResultStatus.FAILED) for c in CHECKLIST.criteria
+    ]
+    score = calculate_score(CHECKLIST, results)
+    assert score.total is None and score.partial_total is None and score.is_partial
+
+
 def test_missing_result_counts_as_failed():
     results = [r for r in vector("yes", "na", "na", 20, "yes", 10, "yes") if r.criterion_id != "c06"]
     assert calculate_score(CHECKLIST, results).missing_criteria == ["c06"]

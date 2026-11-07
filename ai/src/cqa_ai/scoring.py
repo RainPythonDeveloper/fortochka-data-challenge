@@ -143,7 +143,7 @@ def calculate_score(
     ratio = _HUNDRED * earned / applicable_weight if applicable_weight > 0 else None
     return ScoreSummary(
         total=_round(ratio) if ratio is not None and not missing else None,
-        partial_total=_round(ratio) if ratio is not None and missing else None,
+        partial_total=_round(ratio) if ratio is not None and missing and fractions else None,
         is_partial=bool(missing),
         missing_criteria=missing,
         gross_error=bool(gross),
