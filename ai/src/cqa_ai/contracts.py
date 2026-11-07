@@ -194,12 +194,26 @@ class ModelAttempt(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+def _current_prompt_version() -> str:
+    from cqa_ai.prompt import prompt_version
+
+    return prompt_version()
+
+
 class EvaluatorConfig(BaseModel):
+    """Everything that decides a result, so it can serve as a cache key.
+
+    `prompt_version` is computed from the prompt text: any prompt change gets a
+    new key by itself, and an old result can never be reused by mistake.
+    """
+
     provider: str = "mock"
     model: str = "mock"
+    fallback_model: str | None = None
     pipeline: str = "single"
     temperature: float | None = 0
     max_output_tokens: int = 8000
+    prompt_version: str = Field(default_factory=_current_prompt_version)
 
 
 class EvaluationOutput(BaseModel):
