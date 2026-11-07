@@ -24,7 +24,40 @@ const CHAT = 'agent chat';
 const CALL = 'voice call';
 
 export const seedConversations: ConversationDetail[] = [
-  conversation('mock-ru-001', CHAT, 'RU', [
+  conversation('A-1042', CHAT, 'RU', [
+    ['00:00', 'bot', 'Здравствуйте! Я виртуальный помощник.'],
+    ['00:00', 'bot', 'Подтвердите согласие на обработку данных.'],
+    ['00:04', 'client', 'Где посмотреть мой тариф?'],
+    ['00:05', 'bot', 'Соединяю с оператором.'],
+    ['00:06', 'client', 'Спасибо, жду'],
+    ['00:06', 'system', 'Чат передан оператору'],
+    ['00:31', 'operator', 'Здравствуйте! Меня зовут Алина.'],
+    ['00:38', 'operator', 'Тариф указан в кабинете под ФИО.'],
+    ['00:50', 'client', 'А в приложении?'],
+    ['01:02', 'operator', 'В приложении тоже в профиле.'],
+    ['01:15', 'client', 'Нашла, спасибо'],
+    ['01:21', 'operator', 'Пожалуйста. Хорошего дня!'],
+    ['01:21', 'system', 'Оператор закрыл чат'],
+  ]),
+  conversation(
+    'A-1030',
+    CALL,
+    'RU',
+    [
+      ['2026-01-15T10:00:02.0000000+00:00', 'bot', 'Вас приветствует условная компания.'],
+      ['2026-01-15T10:00:09.0000000+00:00', 'client', '2'],
+      ['2026-01-15T10:00:40.0000000+00:00', 'operator', 'Добрый день, меня зовут [Имя скрыто].'],
+      ['2026-01-15T10:00:52.0000000+00:00', 'client', 'Хочу уточнить условный лимит.'],
+      ['2026-01-15T10:01:00.0000000+00:00', 'operator', 'Минуту, уточню у коллеги.'],
+      ['2026-01-15T10:01:03.0000000+00:00', 'system', 'Клиент находится на удержании.'],
+      ['2026-01-15T10:01:06.0000000+00:00', 'operator', 'Коллега, какой лимит на этом условном счёте?'],
+      ['2026-01-15T10:01:14.0000000+00:00', 'operator', 'Обычный, без изменений.'],
+      ['2026-01-15T10:01:20.0000000+00:00', 'system', 'Клиент больше не находится на удержании.'],
+      ['2026-01-15T10:01:24.0000000+00:00', 'operator', 'Спасибо за ожидание, лимит стандартный. Всего доброго!'],
+    ],
+    true,
+  ),
+  conversation('A-1034', CHAT, 'RU', [
     ['00:00', 'client', 'Подскажите, какая комиссия за покупку акций на тарифе «Условный»?'],
     ['00:00', 'bot', 'Здравствуйте! Я виртуальный помощник. Подтвердите согласие на обработку данных.'],
     ['00:05', 'client', 'Согласен'],
@@ -37,7 +70,7 @@ export const seedConversations: ConversationDetail[] = [
     ['01:26', 'operator', 'Рада была помочь, хорошего дня!'],
     ['01:26', 'system', 'Оператор закрыл чат.'],
   ]),
-  conversation('mock-ru-002', CHAT, 'RU', [
+  conversation('A-1040', CHAT, 'RU', [
     ['00:00', 'client', 'Хочу понять, как начать инвестировать небольшую сумму.'],
     ['00:00', 'bot', 'Здравствуйте! Соединяю с оператором.'],
     ['00:02', 'system', 'Диалог передан оператору.'],
@@ -49,7 +82,7 @@ export const seedConversations: ConversationDetail[] = [
     ['01:44', 'operator', 'Хорошо, пишите, если появятся вопросы. Всего доброго!'],
     ['01:44', 'system', 'Оператор закрыл чат.'],
   ]),
-  conversation('mock-kz-001', CHAT, 'KZ', [
+  conversation('A-1041', CHAT, 'KZ', [
     ['00:00', 'client', 'Сәлеметсіз бе, қосымшада шотты қалай толтыруға болады?'],
     ['00:00', 'bot', 'Сәлеметсіз бе! Мен виртуалды көмекшімін. Операторға қосып жатырмын.'],
     ['00:03', 'system', 'Диалог операторға берілді.'],
@@ -59,7 +92,7 @@ export const seedConversations: ConversationDetail[] = [
     ['01:31', 'client', 'Рақмет, түсінікті.'],
     ['02:05', 'system', 'Оператор чатты жапты.'],
   ]),
-  conversation('mock-en-001', CHAT, 'EN', [
+  conversation('A-1039', CHAT, 'EN', [
     ['00:00', 'client', 'My withdrawal has been pending for two days. What is going on?'],
     ['00:00', 'bot', 'Hello! I am the virtual assistant. Connecting you to an operator.'],
     ['00:04', 'system', 'Chat transferred to an operator.'],
@@ -72,14 +105,14 @@ export const seedConversations: ConversationDetail[] = [
     ['02:03', 'operator', 'Thanks for reaching out. Is there anything else I can help with? Have a good day!'],
     ['02:03', 'system', 'Chat closed by the operator.'],
   ]),
-  conversation('mock-ru-003', CHAT, 'RU', [
+  conversation('A-1033', CHAT, 'RU', [
     ['00:00', 'client', 'Где посмотреть отчёт по сделкам за прошлый месяц?'],
     ['00:02', 'system', 'Диалог передан оператору.'],
     ['00:25', 'operator', 'Здравствуйте! Меня зовут Мадина. Отчёт находится в разделе Меню → Документы.'],
     ['00:40', 'client', 'Нашёл, спасибо.'],
     ['00:49', 'operator', 'Пожалуйста, всего доброго!'],
   ]),
-  conversation('mock-ru-004', CHAT, 'RU', [
+  conversation('A-1036', CHAT, 'RU', [
     ['00:00', 'client', 'Не могу подтвердить заявку на смену тарифа, кнопка неактивна.'],
     ['00:03', 'system', 'Диалог передан оператору.'],
     ['00:30', 'operator', 'Здравствуйте! Меня зовут Ержан. Какая у вас версия приложения?'],
@@ -88,14 +121,14 @@ export const seedConversations: ConversationDetail[] = [
     ['01:44', 'client', 'Заработало, спасибо!'],
     ['01:52', 'operator', 'Отлично! Хорошего дня.'],
   ]),
-  conversation('mock-en-002', CHAT, 'EN', [
+  conversation('A-1037', CHAT, 'EN', [
     ['00:00', 'client', 'Can I change the email on my account?'],
     ['00:03', 'system', 'Chat transferred to an operator.'],
     ['00:29', 'operator', "Hello, I'm Aidar. Yes, go to Menu → Profile and tap Edit."],
     ['00:44', 'client', 'Done, thank you.'],
     ['00:51', 'operator', 'You are welcome, goodbye!'],
   ]),
-  conversation('mock-kz-002', CHAT, 'KZ', [
+  conversation('A-1035', CHAT, 'KZ', [
     ['00:00', 'client', 'Тарифті қалай ауыстыруға болады?'],
     ['00:03', 'system', 'Диалог операторға берілді.'],
     ['00:26', 'operator', 'Сәлеметсіз бе! Менің атым Әсел. Қосымшада «Меню → Тариф» бөлімін ашыңыз.'],
@@ -103,7 +136,7 @@ export const seedConversations: ConversationDetail[] = [
     ['00:50', 'operator', 'Оқасы жоқ, сау болыңыз!'],
   ]),
   conversation(
-    'mock-call-001',
+    'A-1038',
     CALL,
     'RU',
     [
@@ -122,7 +155,7 @@ export const seedConversations: ConversationDetail[] = [
     ],
     true,
   ),
-  conversation('mock-web-001', 'web form', 'RU', [
+  conversation('A-1032', 'web form', 'RU', [
     ['00:00', 'client', 'Оставляю заявку через условную форму на сайте.'],
     ['00:30', 'operator', 'Здравствуйте! Меня зовут Жанна. Заявку получила, спасибо.'],
   ]),
@@ -130,14 +163,14 @@ export const seedConversations: ConversationDetail[] = [
 
 /** Only appear after an import, so the import button has a visible effect. */
 export const importableConversations: ConversationDetail[] = [
-  conversation('mock-ru-005', CHAT, 'RU', [
+  conversation('A-1045', CHAT, 'RU', [
     ['00:00', 'client', 'Как скачать справку о состоянии счёта?'],
     ['00:02', 'system', 'Диалог передан оператору.'],
     ['00:24', 'operator', 'Здравствуйте! Меня зовут Камила. Справка есть в разделе Меню → Документы.'],
     ['00:38', 'client', 'Спасибо!'],
     ['00:45', 'operator', 'Всего доброго!'],
   ]),
-  conversation('mock-en-003', CHAT, 'EN', [
+  conversation('A-1046', CHAT, 'EN', [
     ['00:00', 'client', 'Where can I find my tax statement?'],
     ['00:02', 'system', 'Chat transferred to an operator.'],
     ['00:22', 'operator', "Hello, I'm Serik. It is under Menu → Documents."],

@@ -39,7 +39,21 @@ export type SeedRun = {
 
 export const seedRuns: SeedRun[] = [
   {
-    conversation_id: 'mock-ru-001',
+    conversation_id: 'A-1042',
+    checklist: 'chat',
+    results: [
+      assessed('c01', 'yes', 'В первом ответе оператор поздоровался и представился.', { evidence: [ev(6, 'Здравствуйте! Меня зовут Алина.')] }),
+      na('c02', 'Клиент сразу задал конкретный вопрос, данных для ответа хватало.'),
+      na('c03', 'Вопрос о том, где посмотреть тариф, не требует идентификации.'),
+      assessed('c04', 15, 'Основной вопрос решён, но про приложение ответ слишком общий.', { evidence: [ev(7, 'Тариф указан в кабинете под ФИО.'), ev(9, 'В приложении тоже в профиле.')] }),
+      assessed('c05', 'yes', 'Оператор вежлив, недовольства клиент не выражал.', { evidence: [ev(6, 'Здравствуйте!')] }),
+      assessed('c06', 7, 'Один заметный сбой: ответ разбит на две реплики и клиенту пришлось уточнять про приложение.', { evidence: [ev(9, 'В приложении тоже в профиле.')] }),
+      assessed('c07', 'no', 'Попрощался, но не подвёл итог и не предложил помощь.', { evidence: [ev(11, 'Пожалуйста. Хорошего дня!')], range: { from_turn: 10, to_turn: 12 }, flags: ['Спорное правило: прощание без итога читается как «Нет»'] }),
+      assessed('c08', 'no', 'Оскорблений, услуг в обход компании и раскрытия данных нет.', { range: { from_turn: 6, to_turn: 12 } }),
+    ],
+  },
+  {
+    conversation_id: 'A-1034',
     checklist: 'chat',
     results: [
       assessed('c01', 'yes', 'В первом ответе оператор поздоровался и назвал имя.', { evidence: [ev(5, 'Здравствуйте! Меня зовут Алия.')] }),
@@ -53,7 +67,7 @@ export const seedRuns: SeedRun[] = [
     ],
   },
   {
-    conversation_id: 'mock-ru-002',
+    conversation_id: 'A-1040',
     checklist: 'chat',
     results: [
       assessed('c01', 'yes', 'Оператор поздоровался и представился.', { evidence: [ev(3, 'Добрый день! Меня зовут Тимур.')] }),
@@ -67,7 +81,7 @@ export const seedRuns: SeedRun[] = [
     ],
   },
   {
-    conversation_id: 'mock-kz-001',
+    conversation_id: 'A-1041',
     checklist: 'chat',
     results: [
       assessed('c01', 'no', 'Приветствие есть, имени в первом ответе нет.', { range: { from_turn: 3, to_turn: 3 }, expected: 3, evidence: [ev(3, 'Сәлеметсіз бе!')] }),
@@ -81,7 +95,7 @@ export const seedRuns: SeedRun[] = [
     ],
   },
   {
-    conversation_id: 'mock-en-001',
+    conversation_id: 'A-1039',
     checklist: 'chat',
     review_status: 'flagged',
     review_reasons: ['Граница ступеней шкалы: второй вопрос клиента закрыт лишь частично.'],
@@ -97,7 +111,7 @@ export const seedRuns: SeedRun[] = [
     ],
   },
   {
-    conversation_id: 'mock-ru-004',
+    conversation_id: 'A-1036',
     checklist: 'chat',
     invalid_attempt: 'c04: значение 12 не входит в ступени шкалы',
     review_status: 'flagged',
@@ -114,7 +128,7 @@ export const seedRuns: SeedRun[] = [
     ],
   },
   {
-    conversation_id: 'mock-call-001',
+    conversation_id: 'A-1038',
     checklist: 'voice',
     results: [
       assessed('c01', 'yes', 'Оператор поздоровался и назвал имя, плейсхолдер считается произнесённым именем.', { evidence: [ev(4, 'меня зовут [Имя скрыто]')] }),
@@ -130,12 +144,21 @@ export const seedRuns: SeedRun[] = [
 ];
 
 /** Conversations evaluated by the stub provider at seed time. */
-export const seedStubConversations = ['mock-ru-003'];
+export const seedStubConversations = ['A-1033'];
 /** Conversations whose evaluation always fails, to show that a failure is not a zero. */
-export const failingConversations = ['mock-en-002'];
+export const failingConversations = ['A-1037'];
+/** Calls the evaluator refuses to send out, as with the free cloud API. */
+export const blockedConversations = ['A-1030'];
 
-export const seedOpenAppeal = {
-  conversation_id: 'mock-en-001',
-  criterion_id: 'c04',
-  comment: 'Оператор дал понять, что повторять вывод не придётся. Считаю, что вопрос закрыт почти полностью.',
-};
+export const seedOpenAppeals = [
+  {
+    conversation_id: 'A-1039',
+    criterion_id: 'c04',
+    comment: 'Оператор дал понять, что повторять вывод не придётся. Считаю, что вопрос закрыт почти полностью.',
+  },
+  {
+    conversation_id: 'A-1042',
+    criterion_id: 'c07',
+    comment: 'Клиент сам сказал, что нашёл ответ, итог подводить было незачем.',
+  },
+];

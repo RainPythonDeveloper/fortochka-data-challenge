@@ -12,14 +12,16 @@ import type {
   EvaluationSummary,
   ExportItem,
   Job,
+  JobStage,
   ModelAttempt,
   ReportBucket,
   ReviewStatus,
   ScoreSummary,
+  StageId,
 } from '../api/types.ts';
 import { chatChecklist, voiceChecklist } from './checklists.ts';
 import { importableConversations, seedConversations } from './conversations.ts';
-import { failingConversations, seedOpenAppeal, seedRuns, seedStubConversations } from './results.ts';
+import { blockedConversations, failingConversations, seedOpenAppeals, seedRuns, seedStubConversations } from './results.ts';
 import { calculateScore } from './scoring.ts';
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -33,8 +35,13 @@ const fakeHash = (seed: string) =>
 
 let sequence = 0;
 const nextId = (prefix: string) => `${prefix}-${String(++sequence).padStart(4, '0')}`;
-let clock = Date.parse('2026-01-20T08:00:00Z');
-const now = () => new Date((clock += 60_000)).toISOString();
+// Seeded runs are spread over the last hour; everything after them happens now.
+let seedClock: number | null = Date.now() - 62 * 60_000;
+const now = () => {
+  if (seedClock === null) return new Date().toISOString();
+  seedClock += 4.5 * 60_000;
+  return new Date(seedClock).toISOString();
+};
 
 const conversations: ConversationDetail[] = clone(seedConversations);
 const importPool: ConversationDetail[] = clone(importableConversations);
@@ -48,7 +55,7 @@ const jobs = new Map<string, Job>();
 
 const latestOf = (checklistId: string) => {
   const versions = checklists.get(checklistId);
-  if (!versions) throw new ApiError(404, 'Чек-лист не найден');
+  if (!versions) throw new ApiError(404, 'Оценочный лист не найден');
   return versions[versions.length - 1];
 };
 
@@ -65,7 +72,7 @@ const findRun = (id: string) => {
 };
 
 function attempts(stub: boolean, invalid?: string): ModelAttempt[] {
-  const base = { role: 'primary', attempt: 1, cost_usd: 0.0031, input_tokens: 2140, output_tokens: 610, latency_ms: 2400 };
+  const base = { role: 'primary', attempt: 1, cost_usd: 0.0031, input_tokens: 2140, output_tokens: 610, latency_ms: 64_000 };
   if (stub) {
     return [{ provider: 'mock', model: 'mock', role: 'primary', attempt: 1, latency_ms: null, input_tokens: null, output_tokens: null, cost_usd: null, valid: true, errors: [] }];
   }
@@ -85,11 +92,27 @@ function buildRun(
   conversation: ConversationDetail,
   checklist: ChecklistVersion | null,
   results: CriterionResult[],
-  options: { stub?: boolean; failed?: boolean; invalid?: string; review_status?: ReviewStatus; review_reasons?: string[] } = {},
+  options: {
+    stub?: boolean;
+    failed?: boolean;
+    invalid?: string;
+    review_status?: ReviewStatus;
+    review_reasons?: string[];
+    /** Measured time of a run made during the session. */
+    stages?: { id: StageId; ms: number }[];
+    cachedFrom?: string;
+  } = {},
 ): EvaluationRun {
   const id = nextId('eval');
   const score = checklist ? calculateScore(checklist, results) : clone(emptyScore);
-  const attemptList = attempts(Boolean(options.stub), options.invalid);
+  const attemptList = options.cachedFrom ? [] : attempts(Boolean(options.stub), options.invalid);
+  const modelMs = attemptList.reduce((sum, item) => sum + (item.latency_ms ?? 0), 0);
+  const stages = options.stages ?? [
+    { id: 'parse' as const, ms: 210 },
+    { id: 'model' as const, ms: modelMs },
+    { id: 'validate' as const, ms: 95 },
+    { id: 'score' as const, ms: 9 },
+  ];
   const cost = attemptList.reduce((sum, item) => sum + (item.cost_usd ?? 0), 0);
   const run: EvaluationRun = {
     id,
@@ -108,7 +131,11 @@ function buildRun(
     final_score: clone(score),
     checklist: clone(checklist),
     review_status: options.stub || options.failed ? 'flagged' : (options.review_status ?? 'clear'),
-    review_reasons: options.failed ? ['evaluation_failed'] : options.stub ? ['mock_provider'] : (options.review_reasons ?? []),
+    review_reasons: options.failed
+      ? [...(options.review_reasons ?? []), 'evaluation_failed']
+      : options.stub
+        ? ['mock_provider']
+        : (options.review_reasons ?? []),
     log: {
       run_id: id,
       content_hash: fakeHash(conversation.id),
@@ -116,10 +143,11 @@ function buildRun(
       prompt_hash: options.stub ? '' : fakeHash('prompt'),
       pipeline: 'single',
       attempts: attemptList,
-      cache_hit: false,
-      latency_ms: options.stub ? 3 : attemptList.reduce((sum, item) => sum + (item.latency_ms ?? 0), 0),
+      cache_hit: Boolean(options.cachedFrom),
+      latency_ms: options.cachedFrom ? null : Math.round(stages.reduce((sum, item) => sum + item.ms, 0)),
       cost_usd: cost > 0 ? Number(cost.toFixed(4)) : null,
-      cached_from: null,
+      cached_from: options.cachedFrom ?? null,
+      stages: options.failed ? stages.slice(0, 1) : stages,
       evaluator: options.stub ? { provider: 'mock', model: 'mock', pipeline: 'single' } : { provider: 'demo-provider', model: 'demo-model', pipeline: 'single' },
     },
   };
@@ -154,7 +182,7 @@ function stubResults(conversation: ConversationDetail, checklist: ChecklistVersi
       criterion_id: criterion.id,
       status: 'assessed',
       answer: criterion.type === 'scale' ? Math.max(...values) : criterion.flag ? 'no' : 'yes',
-      justification: 'Заглушка: реальная модель не вызывалась.',
+      justification: 'Синтетические данные: модель не вызывалась.',
       evidence,
       reviewed_range: null,
       expected_at_turn: null,
@@ -163,34 +191,54 @@ function stubResults(conversation: ConversationDetail, checklist: ChecklistVersi
   });
 }
 
-for (const seed of seedRuns) {
+const BLOCKED_REASON = 'Звонок не отправлен в модель: в нём есть персональные данные.';
+
+for (const id of blockedConversations) {
+  buildRun(findConversation(id), voiceChecklist, [], {
+    failed: true, invalid: BLOCKED_REASON, review_reasons: ['personal_data_not_sent'],
+  });
+}
+for (const id of failingConversations) {
+  buildRun(findConversation(id), chatChecklist, [], { failed: true, invalid: 'Провайдер не ответил за отведённое время' });
+}
+for (const id of seedStubConversations) {
+  const conversation = findConversation(id);
+  buildRun(conversation, chatChecklist, stubResults(conversation, chatChecklist), { stub: true });
+}
+// Oldest first, so the dialogue of the design reference ends up on top.
+for (const seed of [...seedRuns].reverse()) {
   buildRun(findConversation(seed.conversation_id), seed.checklist === 'chat' ? chatChecklist : voiceChecklist, clone(seed.results), {
     invalid: seed.invalid_attempt,
     review_status: seed.review_status,
     review_reasons: seed.review_reasons,
   });
 }
-for (const id of seedStubConversations) {
-  const conversation = findConversation(id);
-  buildRun(conversation, chatChecklist, stubResults(conversation, chatChecklist), { stub: true });
-}
-for (const id of failingConversations) {
-  buildRun(findConversation(id), chatChecklist, [], { failed: true, invalid: 'Провайдер не ответил за отведённое время' });
-}
-{
-  const conversation = findConversation(seedOpenAppeal.conversation_id);
+for (const seed of seedOpenAppeals) {
   appeals.push({
     id: nextId('appeal'),
-    evaluation_id: conversation.latest_evaluation_id as string,
-    criterion_id: seedOpenAppeal.criterion_id,
-    comment: seedOpenAppeal.comment,
+    evaluation_id: findConversation(seed.conversation_id).latest_evaluation_id as string,
+    criterion_id: seed.criterion_id,
+    comment: seed.comment,
     status: 'open',
     created_at: now(),
     decision: null,
   });
 }
+seedClock = null;
 
-const toSummary = ({ turns: _turns, ...summary }: ConversationDetail): ConversationSummary => clone(summary);
+function toSummary({ turns: _turns, ...summary }: ConversationDetail): ConversationSummary {
+  const run = runs.find((item) => item.id === summary.latest_evaluation_id);
+  const own = new Set(runs.filter((item) => item.conversation_id === summary.id).map((item) => item.id));
+  return clone({
+    ...summary,
+    latest_status: run?.status ?? null,
+    latest_error: run?.error ?? null,
+    latest_reasons: run?.review_reasons ?? [],
+    latest_evaluated_at: run?.created_at ?? null,
+    review_status: run?.review_status ?? null,
+    open_appeals: appeals.filter((item) => item.status === 'open' && own.has(item.evaluation_id)).length,
+  });
+}
 
 const toEvaluationSummary = (run: EvaluationRun): EvaluationSummary => ({
   id: run.id,
@@ -234,50 +282,62 @@ function byChannel(channel: string, assigned: Record<string, string>): Checklist
   const matches = [...checklists.keys()].map(latestOf).filter((item) => item.channels.includes(channel));
   const standard = matches.find((item) => standardIds.includes(item.checklist_id));
   if (standard || matches.length <= 1) return standard ?? matches[0] ?? null;
-  throw new ApiError(422, `Для канала '${channel}' подходит несколько чек-листов: ${matches.map((item) => item.checklist_id).join(', ')}`);
+  throw new ApiError(422, `Для канала '${channel}' подходит несколько листов: ${matches.map((item) => item.checklist_id).join(', ')}`);
 }
 
-function runJob(job: Job, ids: string[], chosen: ChecklistVersion | null, assigned: Record<string, string>, force: boolean) {
-  job.status = 'running';
-  const step = (position: number) => {
-    if (position >= ids.length) {
-      job.status = job.failed === job.total ? 'failed' : 'done';
-      return;
-    }
-    const conversation = findConversation(ids[position]);
-    const checklist = chosen ?? byChannel(conversation.channel, assigned);
-    if (!checklist) {
-      const message = `Нет чек-листа для канала '${conversation.channel}'`;
-      const failed = buildRun(conversation, null, [], { failed: true, invalid: message });
-      job.failed += 1;
-      job.errors.push(`${conversation.id}: ${message}`);
-      job.evaluation_ids.push(failed.id);
-      setTimeout(() => step(position + 1), 900);
-      return;
-    }
-    const cached = runs.find(
-      (run) =>
-        run.conversation_id === conversation.id &&
-        run.checklist_id === checklist.checklist_id &&
-        run.checklist_version === checklist.version &&
-        run.status === 'done',
-    );
-    if (failingConversations.includes(conversation.id)) {
-      const failed = buildRun(conversation, checklist, [], { failed: true, invalid: 'Провайдер не ответил за отведённое время' });
-      job.failed += 1;
-      job.errors.push(`${conversation.id}: провайдер не ответил за отведённое время`);
-      job.evaluation_ids.push(failed.id);
-    } else if (cached && !force) {
-      job.evaluation_ids.push(cached.id);
-      job.done += 1;
-    } else {
-      const run = buildRun(conversation, checklist, stubResults(conversation, checklist), { stub: true });
-      job.evaluation_ids.push(run.id);
-      job.done += 1;
-    }
-    setTimeout(() => step(position + 1), 900);
+const STAGE_MS: Record<StageId, number> = { parse: 500, model: 3200, validate: 500, score: 200 };
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function evaluateOne(job: Job, id: string, chosen: ChecklistVersion | null, assigned: Record<string, string>, force: boolean) {
+  const current: JobStage = { conversation_id: id, stage: 'parse', started_at: new Date().toISOString() };
+  job.current = [current];
+  const conversation = findConversation(id);
+  const checklist = chosen ?? byChannel(conversation.channel, assigned);
+  const stages: { id: StageId; ms: number }[] = [];
+  const stage = async (next: StageId) => {
+    current.stage = next;
+    current.started_at = new Date().toISOString();
+    await pause(STAGE_MS[next]);
+    stages.push({ id: next, ms: STAGE_MS[next] });
   };
-  setTimeout(() => step(0), 500);
+  await stage('parse');
+
+  const fail = (message: string, reasons?: string[]) => {
+    const failed = buildRun(conversation, checklist, [], { failed: true, invalid: message, review_reasons: reasons, stages });
+    job.failed += 1;
+    job.errors.push(`${conversation.id}: ${message}`);
+    job.evaluation_ids.push(failed.id);
+  };
+  if (!checklist) return fail(`Нет оценочного листа для канала '${conversation.channel}'`);
+  const cached = runs.find(
+    (run) =>
+      run.conversation_id === conversation.id &&
+      run.status === 'done' &&
+      run.checklist_id === checklist.checklist_id &&
+      run.log.checklist_hash === rubricHash(checklist),
+  );
+  if (cached && !force) {
+    await stage('score');
+    const run = buildRun(conversation, checklist, clone(cached.results), { cachedFrom: cached.id, stages, review_status: cached.review_status, review_reasons: cached.review_reasons });
+    job.done += 1;
+    job.evaluation_ids.push(run.id);
+    return;
+  }
+  await stage('model');
+  if (blockedConversations.includes(conversation.id)) return fail(BLOCKED_REASON, ['personal_data_not_sent']);
+  if (failingConversations.includes(conversation.id)) return fail('Провайдер не ответил за отведённое время');
+  await stage('validate');
+  await stage('score');
+  const run = buildRun(conversation, checklist, stubResults(conversation, checklist), { stub: true, stages });
+  job.done += 1;
+  job.evaluation_ids.push(run.id);
+}
+
+async function runJob(job: Job, ids: string[], chosen: ChecklistVersion | null, assigned: Record<string, string>, force: boolean) {
+  job.status = 'running';
+  for (const id of ids) await evaluateOne(job, id, chosen, assigned, force);
+  job.current = [];
+  job.status = job.failed === job.total ? 'failed' : 'done';
 }
 
 export const mockApi: Api = {
@@ -323,6 +383,7 @@ export const mockApi: Api = {
       gross_error: false,
       turns: lines.map((line, index) => ({ index, timestamp: String(line.timestamp ?? ''), speaker: String(line.speaker ?? ''), text: String(line.text ?? '') })),
     };
+    if (conversations.some((item) => item.id === conversation.id)) conversation.id = `${conversation.id}-${nextId('copy')}`;
     conversations.push(conversation);
     return { ...toSummary(conversation), warnings: [] };
   },
@@ -336,12 +397,12 @@ export const mockApi: Api = {
   async getChecklist(id, version) {
     await wait();
     const found = version ? checklists.get(id)?.find((item) => item.version === version) : latestOf(id);
-    if (!found) throw new ApiError(404, 'Версия чек-листа не найдена');
+    if (!found) throw new ApiError(404, 'Версия листа не найдена');
     return clone(found);
   },
   async createChecklist(checklist) {
     await wait(300);
-    if (checklists.has(checklist.checklist_id)) throw new ApiError(409, 'Чек-лист с таким идентификатором уже есть');
+    if (checklists.has(checklist.checklist_id)) throw new ApiError(409, 'Лист с таким идентификатором уже есть');
     const saved = { ...clone(checklist), version: 1 };
     checklists.set(saved.checklist_id, [saved]);
     return clone(saved);
@@ -369,10 +430,10 @@ export const mockApi: Api = {
       : request.version
         ? (versions?.find((item) => item.version === request.version) ?? null)
         : latestOf(request.checklist_id);
-    if (request.checklist_id && !checklist) throw new ApiError(404, 'Версия чек-листа не найдена');
-    const job: Job = { id: nextId('job'), status: 'queued', total: request.conversation_ids.length, done: 0, failed: 0, evaluation_ids: [], errors: [] };
+    if (request.checklist_id && !checklist) throw new ApiError(404, 'Версия листа не найдена');
+    const job: Job = { id: nextId('job'), status: 'queued', total: request.conversation_ids.length, done: 0, failed: 0, evaluation_ids: [], errors: [], current: [] };
     jobs.set(job.id, job);
-    runJob(job, request.conversation_ids, checklist, assigned, Boolean(request.force));
+    void runJob(job, request.conversation_ids, checklist, assigned, Boolean(request.force));
     return clone(job);
   },
   async getJob(id) {

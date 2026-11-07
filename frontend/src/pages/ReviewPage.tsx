@@ -1,282 +1,291 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
-import type { Answer, Appeal, Criterion, DecisionCreate, EvaluationRun } from '../api/types';
-import { DecisionCompare } from '../components/DecisionCompare';
-import { TurnRow } from '../components/Transcript';
-import { Badge, Button, EmptyState, ErrorState, Field, LoadingState, inputClass } from '../components/ui';
+import type { ChecklistVersion, ConversationDetail, EvaluationRun, EvaluationSummary } from '../api/types';
+import { CompareDialog } from '../components/CompareDialog';
+import { CriteriaList } from '../components/CriteriaList';
+import { EvidenceLink } from '../components/EvidenceLink';
+import { RerunMenu } from '../components/RerunMenu';
+import { RunLogPanel } from '../components/RunLogPanel';
+import { ScoreBlock } from '../components/ScoreBlock';
+import { StageRail } from '../components/StageRail';
+import { TurnList, type TurnFocus } from '../components/TurnList';
+import { Button, EmptyState, ErrorState, LoadingState, Panel, Tag } from '../components/ui';
 import { host } from '../host/hostAdapter';
-import { answerLabel, answerTone, criterionTitle, fmtDate, fmtNumber } from '../lib/format';
+import { PERSONAL_DATA_FLAG, channelLabel, errorText, isStubRun, languageLabel, visibleFlags } from '../lib/format';
+import { progressFor, useJobs } from '../lib/jobs';
+import { GROSS, MOCK_LABEL } from '../lib/labels';
 import { useAsync } from '../lib/useAsync';
 
-const FRAGMENT_MARGIN = 2;
-const REVIEWER_KEY = 'cqa.reviewer';
+const SETTLE_MS = 2500;
+const REVEAL_MS = 1500;
 
-function rememberedReviewer(): string {
-  try {
-    return host.currentUserName() ?? localStorage.getItem(REVIEWER_KEY) ?? '';
-  } catch {
-    return host.currentUserName() ?? '';
-  }
+export function ReviewPage() {
+  const { id = '' } = useParams();
+  // A new id starts from clean state: no stale run choice or open criterion.
+  return <ReviewView key={id} id={id} />;
 }
 
-function rememberReviewer(name: string) {
-  try {
-    localStorage.setItem(REVIEWER_KEY, name);
-  } catch {
-    // Storage may be blocked inside a host frame. The field is simply empty next time.
-  }
+/** The sheet whose criteria stand as placeholders while the first evaluation runs. */
+async function sheetForChannel(channel: string): Promise<ChecklistVersion | null> {
+  const lists = await api.listChecklists();
+  const match = lists.find((item) => item.channels.includes(channel));
+  return match ? api.getChecklist(match.checklist_id) : null;
 }
 
-const currentValue = (run: EvaluationRun, criterionId: string) => {
-  const result = run.final_results.find((item) => item.criterion_id === criterionId);
-  if (result?.status === 'not_applicable') return 'na';
-  return result?.status === 'assessed' ? String(result.answer) : '';
-};
+function focusFor(run: EvaluationRun | null, criterionId: string | null, nonce: number, turn: number | null): TurnFocus | null {
+  const result = criterionId ? run?.final_results.find((item) => item.criterion_id === criterionId) : undefined;
+  if (!result) return turn === null ? null : { evidence: [], range: null, target: turn, nonce };
+  const evidence = result.evidence.map((item) => item.turn_index);
+  const target = turn ?? evidence[0] ?? result.expected_at_turn ?? result.reviewed_range?.from_turn ?? null;
+  return { evidence, range: result.reviewed_range, target, nonce };
+}
 
-function DecisionForm({ appeal, run, criterion, onDecided }: { appeal: Appeal; run: EvaluationRun; criterion: Criterion; onDecided: () => void }) {
-  const [mode, setMode] = useState<DecisionCreate['decision']>('confirm');
-  const [value, setValue] = useState('');
-  const [reason, setReason] = useState('');
-  const [reviewer, setReviewer] = useState(rememberedReviewer);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+type RunPanelProps = { detail: ConversationDetail; run: EvaluationRun | null; retry: () => void; busy: boolean; failure: string | null };
 
-  const options: { value: string; label: string }[] = [
-    ...(criterion.type === 'boolean'
-      ? (['yes', 'no'] as const).map((answer) => ({ value: answer, label: answerLabel(criterion, 'assessed', answer) }))
-      : criterion.levels.map((level) => ({ value: String(level.value), label: `${level.value}: ${level.text}` }))),
-    ...(criterion.allow_na ? [{ value: 'na', label: `N/A: ${criterion.na_when ?? ''}` }] : []),
-  ];
+function NoResult({ detail, run, retry, busy, failure }: RunPanelProps) {
+  if (run?.status === 'failed') {
+    const blocked = run.review_reasons.includes(PERSONAL_DATA_FLAG);
+    return (
+      <EmptyState title={blocked ? 'Не отправлен: персональные данные' : 'Сбой оценки'}>
+        <p className="mb-3">{run.error ?? 'Причина не указана.'}</p>
+        <Button disabled={busy} onClick={retry}>Повторить</Button>
+        {failure && <p role="alert" className="notice mt-2" data-tone="bad">{failure}</p>}
+      </EmptyState>
+    );
+  }
+  return (
+    <EmptyState title={`${channelLabel(detail.channel)} ещё не оценён`}>
+      <Button variant="primary" disabled={busy} onClick={retry}>Оценить</Button>
+      {failure && <p role="alert" className="notice mt-2" data-tone="bad">{failure}</p>}
+    </EmptyState>
+  );
+}
 
-  const unchanged = mode === 'change' && value === currentValue(run, criterion.id);
-  const ready = reason.trim() && reviewer.trim() && (mode === 'confirm' || (value && !unchanged));
+function ReviewView({ id }: { id: string }) {
+  const { jobs, revision, track } = useJobs();
+  const [params] = useSearchParams();
+  const conversation = useAsync(() => api.getConversation(id), [id, revision]);
+  const history = useAsync(() => api.listEvaluations(id), [id, revision]);
+  const [chosenRun, setChosenRun] = useState<string | null>(params.get('run'));
+  const [openId, setOpenId] = useState<string | null>(params.get('criterion'));
+  const [turnJump, setTurnJump] = useState<{ turn: number; nonce: number } | null>(null);
+  const [showLog, setShowLog] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [audioNotice, setAudioNotice] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
-  const submit = async () => {
-    const answer: Answer = value === 'yes' || value === 'no' ? value : value === 'na' ? null : Number(value);
-    const payload: DecisionCreate = {
-      decision: mode,
-      reason: reason.trim(),
-      reviewer: reviewer.trim(),
-      ...(mode === 'change'
-        ? { new_status: value === 'na' ? ('not_applicable' as const) : ('assessed' as const), new_answer: answer }
-        : {}),
+  const progress = progressFor(jobs, id);
+  const running = Boolean(progress);
+  const runId = chosenRun ?? conversation.data?.latest_evaluation_id ?? null;
+  const loaded = useAsync(() => (runId ? api.getEvaluation(runId) : Promise.resolve(null)), [runId, revision]);
+  const appeals = useAsync(() => (runId ? api.listAppeals({ evaluation_id: runId }) : Promise.resolve([])), [runId, revision]);
+  const run = loaded.data?.id === runId ? loaded.data : null;
+  const fallbackSheet = useAsync(
+    () => (conversation.data && !run?.checklist ? sheetForChannel(conversation.data.channel) : Promise.resolve(null)),
+    [conversation.data?.channel, run?.checklist ? run.id : null],
+  );
+
+  // From the start of a run until its result is here the screen stays in "evaluating".
+  const [awaiting, setAwaiting] = useState(false);
+  const [reveal, setReveal] = useState(false);
+  const startedFrom = useRef<string | null>(null);
+  const lastProgress = useRef(progress);
+  if (progress) lastProgress.current = progress;
+
+  useEffect(() => {
+    if (!running) return;
+    setAwaiting((current) => {
+      if (!current) startedFrom.current = runId;
+      return true;
+    });
+    setChosenRun(null);
+    setOpenId(null);
+    setReveal(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+
+  useEffect(() => {
+    if (running || !awaiting) return;
+    if (run && run.id !== startedFrom.current) {
+      setAwaiting(false);
+      setReveal(true);
+      return;
+    }
+    // A job that died without a run: fall back to what there is.
+    const timer = setTimeout(() => setAwaiting(false), SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [running, awaiting, run]);
+
+  useEffect(() => {
+    if (!reveal) return;
+    const timer = setTimeout(() => setReveal(false), REVEAL_MS);
+    return () => clearTimeout(timer);
+  }, [reveal]);
+
+  const toggle = useCallback((criterionId: string) => {
+    setTurnJump(null);
+    setOpenId((current) => (current === criterionId ? null : criterionId));
+  }, []);
+
+  const criteriaIds = useMemo(() => {
+    const checklist = run?.checklist;
+    if (!checklist) return [];
+    return checklist.sections.flatMap((section) =>
+      checklist.criteria.filter((item) => item.section === section.id).map((item) => item.id),
+    );
+  }, [run]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.target instanceof Element && event.target.closest('input, textarea, select, [role="dialog"]')) return;
+      if (event.key === 'Escape') {
+        setOpenId(null);
+        return;
+      }
+      if ((event.key !== 'ArrowDown' && event.key !== 'ArrowUp') || !criteriaIds.length) return;
+      event.preventDefault();
+      setTurnJump(null);
+      setOpenId((current) => {
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        const position = current ? criteriaIds.indexOf(current) : step > 0 ? -1 : criteriaIds.length;
+        const next = criteriaIds[Math.min(Math.max(position + step, 0), criteriaIds.length - 1)];
+        document.querySelector<HTMLElement>(`[data-crit-row="${next}"]`)?.focus({ preventScroll: true });
+        return next;
+      });
     };
-    setBusy(true);
-    setError(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [criteriaIds]);
+
+  const criteriaScroller = useRef<HTMLDivElement>(null);
+  const turnScroller = useRef<HTMLDivElement>(null);
+  const columns = useRef<HTMLDivElement>(null);
+
+  // A link with ?criterion= opens the row below the fold: bring it into view.
+  useEffect(() => {
+    if (!openId || !run) return;
+    const row = criteriaScroller.current?.querySelector(`[data-crit-row="${openId}"]`);
+    row?.scrollIntoView({ block: 'nearest' });
+  }, [openId, run]);
+
+  const busy = running || awaiting;
+  const shownRun = busy ? null : run;
+  const focus = useMemo(
+    () => focusFor(shownRun, openId, turnJump?.nonce ?? 0, turnJump?.turn ?? null),
+    [shownRun, openId, turnJump],
+  );
+
+  const evaluate = async () => {
+    setStarting(true);
+    setStartError(null);
     try {
-      await api.decideAppeal(appeal.id, payload);
-      rememberReviewer(reviewer.trim());
-      onDecided();
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Решение не сохранено');
-      setBusy(false);
+      track(await api.createEvaluation({ conversation_ids: [id] }), [id]);
+    } catch (reason) {
+      setStartError(errorText(reason, 'Не удалось запустить оценку'));
+    } finally {
+      setStarting(false);
     }
   };
 
-  return (
-    <section className="rounded border border-line bg-white p-3">
-      <h2 className="mb-2 font-semibold">Решение</h2>
-      <div className="mb-2 flex gap-4">
-        <label className="flex items-center gap-1">
-          <input type="radio" name="decision" checked={mode === 'confirm'} onChange={() => setMode('confirm')} />
-          Подтвердить оценку
-        </label>
-        <label className="flex items-center gap-1">
-          <input type="radio" name="decision" checked={mode === 'change'} onChange={() => setMode('change')} />
-          Изменить оценку
-        </label>
-      </div>
-      <div className="space-y-2">
-        {mode === 'change' && (
-          <Field label="Новая оценка">
-            <select className={inputClass} value={value} onChange={(event) => setValue(event.target.value)}>
-              <option value="">Выберите значение</option>
-              {options.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            {unchanged && <span className="text-xs text-amber-800">Значение совпадает с текущим. Для этого есть подтверждение.</span>}
-          </Field>
-        )}
-        <Field label="Причина решения (обязательно)">
-          <textarea rows={3} className={inputClass} value={reason} onChange={(event) => setReason(event.target.value)} />
-        </Field>
-        <Field label="Проверяющий">
-          <input className={inputClass} value={reviewer} onChange={(event) => setReviewer(event.target.value)} />
-        </Field>
-        {error && <p role="alert" className="text-red-700">{error}</p>}
-        <Button variant="primary" disabled={busy || !ready} onClick={submit}>
-          {busy ? 'Сохранение…' : 'Сохранить решение'}
-        </Button>
-      </div>
-    </section>
-  );
-}
+  if (conversation.error) return <Panel><ErrorState message={conversation.error} onRetry={conversation.reload} /></Panel>;
+  if (!conversation.data) return <Panel><LoadingState label="Загружаем диалог…" /></Panel>;
+  const detail = conversation.data;
+  const isCall = detail.channel === 'voice call';
+  const runs: EvaluationSummary[] = history.data ?? [];
+  const checklist = shownRun?.checklist ?? (busy ? (run?.checklist ?? fallbackSheet.data) : null);
+  const reasons = shownRun ? visibleFlags(shownRun.review_reasons) : [];
+  const hasResults = Boolean(shownRun?.final_results.length && shownRun.checklist);
+  const openResult = shownRun?.final_results.find((item) => item.criterion_id === openId);
 
-function AppealDetail({ appeal, onDecided }: { appeal: Appeal; onDecided: () => void }) {
-  const run = useAsync(() => api.getEvaluation(appeal.evaluation_id), [appeal.id, appeal.status]);
-  const conversationId = run.data?.conversation_id;
-  const conversation = useAsync(
-    () => (conversationId ? api.getConversation(conversationId) : Promise.resolve(null)),
-    [conversationId],
-  );
-
-  if (run.error) return <ErrorState message={run.error} onRetry={run.reload} />;
-  if (!run.data) return <LoadingState label="Загружаем спорную оценку…" />;
-
-  const data = run.data;
-  const criterion = data.checklist?.criteria.find((item) => item.id === appeal.criterion_id);
-  const original = data.results.find((item) => item.criterion_id === appeal.criterion_id);
-  const originalScore = data.score.criteria.find((item) => item.criterion_id === appeal.criterion_id);
-  if (!criterion || !original) return <ErrorState message="Критерия апелляции нет в запуске оценки." />;
-
-  const evidenceTurns = original.evidence.map((item) => item.turn_index);
-  const anchors = [
-    ...evidenceTurns,
-    ...(original.reviewed_range ? [original.reviewed_range.from_turn, original.reviewed_range.to_turn] : []),
-    ...(original.expected_at_turn !== null ? [original.expected_at_turn] : []),
-  ];
-  const turns = conversation.data?.turns ?? [];
-  const from = anchors.length ? Math.min(...anchors) - FRAGMENT_MARGIN : -Infinity;
-  const to = anchors.length ? Math.max(...anchors) + FRAGMENT_MARGIN : Infinity;
-  const fragment = turns.filter((turn) => turn.index >= from && turn.index <= to);
-
-  return (
-    <div className="space-y-3">
-      <section className="rounded border border-line bg-white p-3">
-        <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1">
-            <h2 className="font-semibold">{criterion.title}</h2>
-            <p className="text-xs text-stone-500">
-              <Link className="text-brand-700 hover:underline" to={`/conversations/${encodeURIComponent(data.conversation_id)}`}>
-                {data.conversation_id}
-              </Link>
-              , чек-лист v{data.checklist_version}, подана {fmtDate(appeal.created_at)}
-            </p>
-          </div>
-          <Badge tone={answerTone(criterion, original.status, original.answer)}>
-            {answerLabel(criterion, original.status, original.answer)}
-          </Badge>
-          {criterion.scored && <span className="font-semibold tabular-nums">{fmtNumber(originalScore?.points)} б.</span>}
-        </div>
-        <p className="mt-2"><span className="font-medium">Объяснение: </span>{original.justification}</p>
-        <p className="mt-2 rounded bg-amber-50 px-2 py-1"><span className="font-medium">Комментарий апелляции: </span>{appeal.comment}</p>
-        {criterion.yes_when && <p className="mt-2 text-xs text-stone-500">Условие «Да»: {criterion.yes_when}</p>}
-        {criterion.prompt && <p className="mt-2 text-xs text-stone-500">{criterion.prompt}</p>}
-      </section>
-
-      <section className="rounded border border-line bg-white p-3">
-        <h2 className="mb-2 font-semibold">Фрагмент диалога</h2>
-        {conversation.error ? (
-          <ErrorState message={conversation.error} onRetry={conversation.reload} />
-        ) : !conversation.data ? (
-          <LoadingState label="Загружаем фрагмент…" />
-        ) : (
-          <div className="space-y-1">
-            {fragment.map((turn) => (
-              <TurnRow key={turn.index} turn={turn} marked={evidenceTurns.includes(turn.index)} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {appeal.status === 'open' ? (
-        <DecisionForm appeal={appeal} run={data} criterion={criterion} onDecided={onDecided} />
-      ) : (
-        <section className="space-y-2 rounded border border-line bg-white p-3">
-          <DecisionCompare run={data} appeal={appeal} />
-          <p>
-            Итог диалога: {fmtNumber(data.score.total)} → <b data-testid="review-final-total">{fmtNumber(data.final_score.total)}</b>
-          </p>
-        </section>
-      )}
-    </div>
-  );
-}
-
-export function ReviewPage() {
-  const [tab, setTab] = useState<Appeal['status']>('open');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const appeals = useAsync(() => api.listAppeals(), []);
-
-  // The list needs titles, and Appeal carries only ids, so each run is read once.
-  const items = useMemo(() => appeals.data ?? [], [appeals.data]);
-  const evaluationIds = [...new Set(items.map((item) => item.evaluation_id))];
-  const runs = useAsync(
-    async () => new Map((await Promise.all(evaluationIds.map((id) => api.getEvaluation(id)))).map((run) => [run.id, run])),
-    [evaluationIds.join('|')],
-  );
-
-  const visible = items.filter((item) => item.status === tab);
-  const openCount = items.filter((item) => item.status === 'open').length;
-  const selected = items.find((item) => item.id === selectedId) ?? null;
-
-  useEffect(() => {
-    if (selectedId === null) setSelectedId(items.find((item) => item.status === 'open')?.id ?? null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items]);
-
-  const switchTab = (next: Appeal['status']) => {
-    setTab(next);
-    setSelectedId(items.find((item) => item.status === next)?.id ?? null);
+  const openAudio = () => {
+    const url = api.audioUrl(detail.id);
+    if (url) host.openExternal(url);
+    else setAudioNotice('Записи нет: это синтетические данные.');
   };
 
   return (
-    <div className="mx-auto grid h-full max-w-[1400px] grid-cols-[320px_minmax(0,1fr)]">
-      <aside className="min-h-0 overflow-y-auto border-r border-line bg-white">
-        <div className="border-b border-line p-3">
-          <h1 className="text-base font-semibold">Очередь проверки</h1>
-          <div className="mt-2 flex gap-1">
-            <Button variant={tab === 'open' ? 'primary' : 'secondary'} onClick={() => switchTab('open')}>Ожидают ({openCount})</Button>
-            <Button variant={tab === 'decided' ? 'primary' : 'secondary'} onClick={() => switchTab('decided')}>
-              Решённые ({items.length - openCount})
-            </Button>
+    <>
+      <Panel className="rhead">
+        <div className="rhead__main">
+          <div className="rhead__line">
+            <h1 className="title">Диалог {detail.id}</h1>
+            <Tag>{channelLabel(detail.channel)}</Tag>
+            <Tag>{languageLabel(detail.language)}</Tag>
+            {shownRun?.final_score.gross_error && <span className="badge" data-tone="bad">{GROSS}</span>}
+            {shownRun && isStubRun(shownRun) && <Tag tone="amber">{MOCK_LABEL}</Tag>}
+            {detail.has_audio && <Button variant="text" className="ml-2" onClick={openAudio}>Открыть запись</Button>}
+            {audioNotice && <span role="status" className="notice">{audioNotice}</span>}
+            <div className="rhead__actions">
+              {!busy && <RerunMenu conversationId={detail.id} channel={detail.channel} label={runId ? 'Оценить заново' : 'Оценить'} />}
+              {runs.length > 1 && <Button variant="text" onClick={() => setShowHistory(true)}>История оценок</Button>}
+            </div>
           </div>
+          <StageRail run={run} progress={progress ?? (awaiting ? lastProgress.current : null)} onOpenLog={() => setShowLog(true)} />
         </div>
-        {appeals.error ? (
-          <ErrorState message={appeals.error} onRetry={appeals.reload} />
-        ) : !appeals.data ? (
-          <LoadingState />
-        ) : !visible.length ? (
-          <EmptyState title={tab === 'open' ? 'Спорных оценок нет' : 'Решений пока нет'}>
-            {tab === 'open' ? 'Апелляции подаются из карточки диалога.' : undefined}
-          </EmptyState>
-        ) : (
-          <ul>
-            {visible.map((item) => {
-              const run = runs.data?.get(item.evaluation_id);
-              return (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(item.id)}
-                    className={`block w-full border-b border-stone-100 px-3 py-2 text-left hover:bg-brand-50 ${item.id === selectedId ? 'bg-brand-50' : ''}`}
-                  >
-                    <span className="block font-medium">{run ? criterionTitle(run.checklist, item.criterion_id) : item.criterion_id}</span>
-                    <span className="block text-xs text-stone-500">{run?.conversation_id ?? item.evaluation_id}, {fmtDate(item.created_at)}</span>
-                    <span className="mt-0.5 line-clamp-2 block text-xs text-stone-700">{item.comment}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </aside>
-      <div className="min-h-0 overflow-y-auto p-3">
-        {selected ? (
-          <AppealDetail
-            key={selected.id}
-            appeal={selected}
-            onDecided={() => {
-              setTab('decided');
-              appeals.reload();
-            }}
-          />
-        ) : (
-          !appeals.loading && <EmptyState title="Выберите апелляцию в списке" />
-        )}
+        <ScoreBlock run={run} running={busy} reveal={reveal} />
+      </Panel>
+
+      <div ref={columns} className="review-cols">
+        <Panel className="scroll-panel">
+          <div className="panel-label">{isCall ? 'Расшифровка' : 'Переписка'}</div>
+          <div ref={turnScroller} data-scroller className="scroll-panel__body">
+            <TurnList turns={detail.turns} isCall={isCall} focus={focus} scroller={turnScroller} />
+          </div>
+        </Panel>
+        <Panel className="scroll-panel">
+          <div className="panel-label">Оценка по критериям</div>
+          <div ref={criteriaScroller} data-scroller className="scroll-panel__body">
+            <div>
+              {loaded.error ? (
+                <ErrorState message={loaded.error} onRetry={loaded.reload} />
+              ) : busy && !checklist ? (
+                <LoadingState label="Оцениваем…" />
+              ) : busy || hasResults ? (
+                <>
+                  {reasons.length > 0 && <p className="why__flag mb-2">Есть спорные места: {reasons.join('; ')}</p>}
+                  {appeals.error && <p role="alert" className="notice mb-2" data-tone="bad">Апелляции не загрузились: {appeals.error}</p>}
+                  {checklist && (
+                    <CriteriaList
+                      checklist={checklist}
+                      run={shownRun}
+                      appeals={(appeals.data ?? []).filter((item) => item.evaluation_id === runId)}
+                      openId={openId}
+                      reveal={reveal}
+                      onToggle={toggle}
+                      onTurn={(turn) => setTurnJump((current) => ({ turn, nonce: (current?.nonce ?? 0) + 1 }))}
+                      onAppealChanged={() => {
+                        loaded.reload();
+                        appeals.reload();
+                      }}
+                    />
+                  )}
+                </>
+              ) : runId && !run ? (
+                <LoadingState label="Загружаем оценку…" />
+              ) : (
+                <NoResult detail={detail} run={shownRun} retry={evaluate} busy={starting} failure={startError} />
+              )}
+            </div>
+          </div>
+        </Panel>
+        <EvidenceLink root={columns} criterionId={openId} turnIndex={openResult?.evidence[0]?.turn_index ?? null} />
       </div>
-    </div>
+
+      {showLog && run && <RunLogPanel run={run} onClose={() => setShowLog(false)} />}
+      {showHistory && (
+        <CompareDialog
+          runs={runs}
+          shownId={runId}
+          onOpen={(next) => {
+            setChosenRun(next);
+            setOpenId(null);
+            setShowHistory(false);
+          }}
+          onClose={() => setShowHistory(false)}
+        />
+      )}
+    </>
   );
 }

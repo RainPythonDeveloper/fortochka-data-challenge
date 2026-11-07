@@ -1,116 +1,178 @@
-import { useEffect, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import type { Tone } from '../lib/format';
+import { reducedMotion } from '../lib/motion';
 
-const buttonStyles = {
-  primary: 'bg-brand-700 text-white hover:bg-brand-800 disabled:bg-stone-300',
-  secondary: 'border border-line bg-white text-stone-800 hover:bg-stone-50 disabled:text-stone-400',
-  ghost: 'text-brand-700 hover:bg-brand-50 disabled:text-stone-400',
-  danger: 'border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:text-stone-400',
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'primary' | 'secondary' | 'text' | 'icon';
+  size?: 'large' | 'normal';
 };
 
-export function Button({
-  variant = 'secondary',
-  className = '',
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: keyof typeof buttonStyles }) {
+export function Button({ variant = 'secondary', size = 'normal', className = '', ...props }: ButtonProps) {
+  return <button type="button" {...props} data-variant={variant} data-size={size} className={`btn ${className}`} />;
+}
+
+export function Panel({ className = '', children, ...props }: React.HTMLAttributes<HTMLElement>) {
+  return (
+    <section {...props} className={`panel ${className}`}>
+      {children}
+    </section>
+  );
+}
+
+export function Tag({ tone, children }: { tone?: 'amber'; children: ReactNode }) {
+  return <span className="tag" data-tone={tone}>{children}</span>;
+}
+
+export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
+  return <span className="badge" data-tone={tone}>{children}</span>;
+}
+
+export function Spinner() {
+  return <span className="spinner" aria-hidden />;
+}
+
+type ToggleProps = { on: boolean; label: string; disabled?: boolean; title?: string; onChange?: (on: boolean) => void };
+
+export function Toggle({ on, label, disabled, title, onChange }: ToggleProps) {
   return (
     <button
       type="button"
-      {...props}
-      className={`inline-flex h-7 items-center gap-1 whitespace-nowrap rounded px-2.5 text-[13px] font-medium disabled:cursor-not-allowed ${buttonStyles[variant]} ${className}`}
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled}
+      title={title}
+      className="toggle"
+      onClick={() => onChange?.(!on)}
     />
   );
 }
 
-const badgeStyles: Record<Tone, string> = {
-  neutral: 'bg-stone-100 text-stone-700',
-  good: 'bg-brand-100 text-brand-800',
-  warn: 'bg-amber-100 text-amber-900',
-  bad: 'bg-red-100 text-red-800',
-  muted: 'bg-stone-200 text-stone-600',
-};
+export function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <div className="fold" data-open={open || undefined}>
+      <div className="fold__inner" inert={!open}>{children}</div>
+    </div>
+  );
+}
 
-export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
-  return <span className={`inline-block whitespace-nowrap rounded px-1.5 py-px text-xs font-medium ${badgeStyles[tone]}`}>{children}</span>;
+/** Crossfades one cell when `id` changes. The outgoing content stays for its fade. */
+export function Swap({ id, align, children }: { id: string; align?: 'end'; children: ReactNode }) {
+  const previous = useRef({ id, children });
+  const [outgoing, setOutgoing] = useState<{ id: string; children: ReactNode } | null>(null);
+
+  useLayoutEffect(() => {
+    const last = previous.current;
+    previous.current = { id, children };
+    if (last.id !== id && !reducedMotion()) setOutgoing(last);
+  });
+
+  useEffect(() => {
+    if (!outgoing) return;
+    const timer = setTimeout(() => setOutgoing(null), 200);
+    return () => clearTimeout(timer);
+  }, [outgoing]);
+
+  return (
+    <span className="swap" data-align={align}>
+      {outgoing && <span key={`out-${outgoing.id}`} className="swap__item" data-state="out" aria-hidden>{outgoing.children}</span>}
+      <span key={id} className="swap__item" data-state={outgoing ? 'in' : undefined}>{children}</span>
+    </span>
+  );
+}
+
+/** A small popover by its trigger. Closes on Esc and on a click outside. */
+export function Menu({
+  trigger,
+  children,
+  popClass = '',
+}: {
+  trigger: (props: { open: boolean; toggle: () => void }) => ReactNode;
+  children: (close: () => void) => ReactNode;
+  popClass?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
+
+  return (
+    <div ref={root} className="menu">
+      {trigger({ open, toggle: () => setOpen((value) => !value) })}
+      {open && <div className={`menu__pop ${popClass}`}>{children(() => setOpen(false))}</div>}
+    </div>
+  );
 }
 
 export function LoadingState({ label = 'Загрузка…' }: { label?: string }) {
   return (
-    <div role="status" className="flex items-center justify-center gap-2 p-8 text-stone-500">
-      <span className="size-4 animate-spin rounded-full border-2 border-brand-200 border-t-brand-700" />
-      {label}
+    <div role="status" className="state-box">
+      <Spinner /> <span className="ml-2">{label}</span>
     </div>
   );
 }
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div role="alert" className="m-4 rounded border border-red-200 bg-red-50 p-3 text-red-800">
-      <p className="font-medium">Не удалось загрузить данные</p>
-      <p className="mt-0.5">{message}</p>
-      {onRetry && (
-        <Button className="mt-2" onClick={onRetry}>
-          Повторить
-        </Button>
-      )}
+    <div role="alert" className="state-box">
+      <p className="state-box__title">Не удалось загрузить данные</p>
+      <p className="mt-1 mb-3">{message}</p>
+      {onRetry && <Button onClick={onRetry}>Повторить</Button>}
     </div>
   );
 }
 
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="p-8 text-center text-stone-500">
-      <p className="font-medium text-stone-700">{title}</p>
-      {children && <div className="mt-1">{children}</div>}
+    <div className="state-box">
+      <p className="state-box__title">{title}</p>
+      {children && <div className="mt-2">{children}</div>}
     </div>
   );
 }
 
-export function Banner({ tone, title, children }: { tone: 'bad' | 'warn' | 'info'; title: ReactNode; children?: ReactNode }) {
-  const styles = {
-    bad: 'border-red-700 bg-red-700 text-white',
-    warn: 'border-amber-300 bg-amber-50 text-amber-950',
-    info: 'border-stone-300 bg-stone-100 text-stone-800',
-  };
-  return (
-    <div className={`rounded border px-3 py-2 ${styles[tone]}`}>
-      <p className="font-semibold">{title}</p>
-      {children && <div className="mt-0.5">{children}</div>}
-    </div>
-  );
-}
-
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-0.5 block text-xs font-medium text-stone-600">{label}</span>
-      {children}
-      {hint && <span className="mt-0.5 block text-xs text-stone-500">{hint}</span>}
-    </label>
-  );
-}
-
-export const inputClass =
-  'w-full rounded border border-line bg-white px-2 py-1 text-[13px] outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
-
-export function Modal({ title, wide, onClose, children }: { title: string; wide?: boolean; onClose: () => void; children: ReactNode }) {
+function useEscape(onClose: () => void) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+}
+
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  useEscape(onClose);
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={`max-h-full w-full overflow-y-auto rounded-md bg-white p-4 shadow-lg ${wide ? 'max-w-4xl' : 'max-w-lg'}`}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h2 className="mb-3 text-sm font-semibold">{title}</h2>
+    <div className="modal" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label={title} className="modal__body" onClick={(event) => event.stopPropagation()}>
         {children}
       </div>
+    </div>
+  );
+}
+
+export function Drawer({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  useEscape(onClose);
+  return (
+    <div className="drawer" onClick={onClose}>
+      <aside role="dialog" aria-modal="true" aria-label={title} className="drawer__body" onClick={(event) => event.stopPropagation()}>
+        {children}
+      </aside>
     </div>
   );
 }

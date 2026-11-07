@@ -11,6 +11,7 @@ const criterion = (fields: Partial<Criterion> & Pick<Criterion, 'id' | 'section'
   na_when: null,
   levels: [],
   team_notes: [],
+  disabled_notes: [],
   ...fields,
 });
 
@@ -43,7 +44,7 @@ const chatCriteria: Criterion[] = [
   criterion({ id: 'c04', section: 's2', title: 'Корректная и полная консультация', type: 'scale', weight: 20, allow_na: true, prompt: 'Оцените ответ или следующий шаг по шкале.', na_when: 'Чат закончился до того, как клиент сформулировал запрос.', levels: c04Levels }),
   criterion({ id: 'c05', section: 's3', title: 'Эмпатия и клиентоориентированность', type: 'boolean', weight: 15, yes_when: 'Оператор вежлив и, если клиент выразил недовольство или описал неудобство, отреагировал на конкретную проблему.' }),
   criterion({ id: 'c06', section: 's3', title: 'Управление диалогом, скорость и грамотность', type: 'scale', weight: 15, prompt: 'Оцените ясность, порядок ответов и предупреждение об ожидании по шкале.', levels: c06Levels }),
-  criterion({ id: 'c07', section: 's3', title: 'Завершение', type: 'boolean', weight: 5, allow_na: true, yes_when: 'Оператор подвёл итог или предложил дальнейшую помощь и попрощался.', na_when: 'Чат оборвался до возможности его завершить.' }),
+  criterion({ id: 'c07', section: 's3', title: 'Завершение', type: 'boolean', weight: 5, allow_na: true, yes_when: 'Оператор подвёл итог или предложил дальнейшую помощь и попрощался.', na_when: 'Чат оборвался до возможности его завершить.' , team_notes: ['Прощание без итога и без предложения помощи считать «Нет»', 'Обрыв связи или уход клиента: не применимо'] }),
   criterion({ id: 'c08', section: 's4', title: 'Грубые ошибки', type: 'boolean', weight: 0, scored: false, flag: 'gross_error', yes_when: 'Выявлено оскорбление клиента, предложение платной услуги в обход компании или раскрытие конфиденциальной информации. Нет: ни одно из трёх не выявлено.' }),
 ];
 
