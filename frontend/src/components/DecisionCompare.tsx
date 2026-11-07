@@ -3,7 +3,7 @@ import { answerLabel, answerTone, fmtDate, fmtNumber } from '../lib/format';
 import { Badge } from './ui';
 
 function Outcome({ run, criterionId, side }: { run: EvaluationRun; criterionId: string; side: 'original' | 'final' }) {
-  const criterion = run.checklist.criteria.find((item) => item.id === criterionId);
+  const criterion = run.checklist?.criteria.find((item) => item.id === criterionId);
   const results = side === 'original' ? run.results : run.final_results;
   const scores = side === 'original' ? run.score : run.final_score;
   const result = results.find((item) => item.criterion_id === criterionId);

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import type { ConversationSummary, ImportResult } from '../api/types';
+import type { ConversationSummary, ImportResult, TranscriptResult } from '../api/types';
 import { RunEvaluation } from '../components/RunEvaluation';
 import { Badge, Button, EmptyState, ErrorState, Field, LoadingState, Modal, inputClass } from '../components/ui';
-import { channelLabel, fmtNumber } from '../lib/format';
+import { host } from '../host/hostAdapter';
+import { channelLabel, fmtNumber, splitImportMessages } from '../lib/format';
 import { useJobs } from '../lib/jobs';
 import { useAsync } from '../lib/useAsync';
 
@@ -19,6 +20,7 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const messages = result ? splitImportMessages(result.errors) : null;
 
   const submit = async () => {
     setBusy(true);
@@ -50,9 +52,22 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
             <p>
               Группа {result.group_id}: загружено {result.imported}, пропущено {result.skipped}.
             </p>
-            {result.errors.map((item) => (
-              <p key={item} className="text-amber-800">{item}</p>
-            ))}
+          </div>
+        )}
+        {messages && messages.errors.length > 0 && (
+          <div data-testid="import-errors" className="mt-2 rounded bg-red-50 p-2 text-red-800">
+            <p className="font-medium">Ошибки: {messages.errors.length}</p>
+            <ul className="max-h-32 overflow-y-auto">
+              {messages.errors.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        )}
+        {messages && messages.warnings.length > 0 && (
+          <div data-testid="import-warnings" className="mt-2 rounded bg-amber-50 p-2 text-amber-900">
+            <p className="font-medium">Предупреждения: {messages.warnings.length}</p>
+            <ul className="max-h-32 overflow-y-auto">
+              {messages.warnings.map((item) => <li key={item}>{item}</li>)}
+            </ul>
           </div>
         )}
         <div className="mt-3 flex justify-end gap-2">
@@ -66,12 +81,131 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
   );
 }
 
+function TranscriptDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const navigate = useNavigate();
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<TranscriptResult | null>(null);
+
+  const readFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) setText(await file.text());
+  };
+
+  const submit = async () => {
+    setError(null);
+    setResult(null);
+    let record: unknown;
+    try {
+      record = JSON.parse(text);
+    } catch {
+      setError('Текст не является корректным JSON.');
+      return;
+    }
+    setBusy(true);
+    try {
+      setResult(await api.uploadTranscript(record));
+      onDone();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Загрузка не удалась');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Загрузка транскрипта" onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Файл JSON">
+          <input aria-label="Файл транскрипта" type="file" accept=".json,application/json" onChange={readFile} />
+        </Field>
+        <Field label="Или вставьте JSON одной записи" hint="Поля записи: conversation_id, channel, language, transcript (timestamp, speaker, text)">
+          <textarea
+            aria-label="JSON транскрипта"
+            rows={9}
+            spellCheck={false}
+            className={`${inputClass} font-mono text-xs`}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+          />
+        </Field>
+        {error && <p role="alert" className="rounded bg-red-50 p-2 text-red-800">{error}</p>}
+        {result && (
+          <div data-testid="upload-result" className="rounded bg-brand-50 p-2">
+            <p>Загружен диалог {result.id}, реплик: {result.turn_count}.</p>
+            {result.warnings.length > 0 && (
+              <ul data-testid="upload-warnings" className="mt-1 text-amber-800">
+                {result.warnings.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>{result ? 'Закрыть' : 'Отмена'}</Button>
+          {result ? (
+            <Button variant="primary" onClick={() => navigate(`/conversations/${encodeURIComponent(result.id)}`)}>
+              Открыть карточку
+            </Button>
+          ) : (
+            <Button variant="primary" disabled={busy || !text.trim()} onClick={submit}>
+              {busy ? 'Загрузка…' : 'Загрузить'}
+            </Button>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ExportControls() {
+  const [groupId, setGroupId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const download = async (format: 'json' | 'csv') => {
+    const filters = { group_id: groupId.trim() || undefined };
+    setBusy(true);
+    setError(null);
+    try {
+      if (format === 'json') {
+        host.saveFile('ai-results.json', JSON.stringify(await api.exportResults(filters), null, 2), 'application/json');
+      } else {
+        // The BOM lets Excel read Cyrillic correctly.
+        host.saveFile('ai-results.csv', `\uFEFF${await api.exportCsv(filters)}`, 'text/csv;charset=utf-8');
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Экспорт не удался');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1" title="Исходные автоматические результаты, без решений по апелляциям">
+      {error && <span role="alert" className="mr-2 text-red-700">{error}</span>}
+      <span className="text-stone-600">Экспорт:</span>
+      <input
+        aria-label="group_id для экспорта"
+        placeholder="group_id"
+        className={`${inputClass} !w-24`}
+        value={groupId}
+        onChange={(event) => setGroupId(event.target.value)}
+      />
+      <Button disabled={busy} onClick={() => download('json')}>JSON</Button>
+      <Button disabled={busy} onClick={() => download('csv')}>CSV</Button>
+    </div>
+  );
+}
+
 export function ConversationsPage() {
   const { revision } = useJobs();
   const [channel, setChannel] = useState('');
   const [language, setLanguage] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const conversations = useAsync(
     () => api.listConversations({ channel: channel || undefined, language: language || undefined }),
     [channel, language, revision],
@@ -115,7 +249,9 @@ export function ConversationsPage() {
             <option key={value} value={value}>{value}</option>
           ))}
         </select>
-        <Button className="ml-auto" onClick={() => setImporting(true)}>Импорт по group_id</Button>
+        <div className="ml-auto"><ExportControls /></div>
+        <Button onClick={() => setUploading(true)}>Загрузить транскрипт</Button>
+        <Button onClick={() => setImporting(true)}>Импорт по group_id</Button>
       </div>
 
       <div className="mb-2 flex min-h-9 items-center gap-3 rounded border border-line bg-white px-3 py-1">
@@ -189,6 +325,7 @@ export function ConversationsPage() {
       {importing && (
         <ImportDialog onClose={() => setImporting(false)} onDone={conversations.reload} />
       )}
+      {uploading && <TranscriptDialog onClose={() => setUploading(false)} onDone={conversations.reload} />}
     </div>
   );
 }

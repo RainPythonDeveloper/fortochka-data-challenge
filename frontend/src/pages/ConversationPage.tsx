@@ -1,7 +1,16 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
-import type { Appeal, ConversationDetail, Criterion, CriterionResult, EvaluationRun, ScoreSummary } from '../api/types';
+import type {
+  Appeal,
+  ChecklistVersion,
+  ConversationDetail,
+  Criterion,
+  CriterionResult,
+  EvaluationRun,
+  ScoreSummary,
+} from '../api/types';
+import { CompareDialog } from '../components/CompareDialog';
 import { DecisionCompare } from '../components/DecisionCompare';
 import { RunEvaluation } from '../components/RunEvaluation';
 import { Transcript, type TurnFocus } from '../components/Transcript';
@@ -12,11 +21,11 @@ import {
   answerTone,
   channelLabel,
   criterionTitle,
-  fmtDate,
   fmtNumber,
   isStubRun,
   reasonLabel,
-  STUB_FLAG,
+  reviewNotes,
+  runLabel,
 } from '../lib/format';
 import { useJobs } from '../lib/jobs';
 import { useAsync } from '../lib/useAsync';
@@ -56,8 +65,8 @@ function TotalBox({ label, run, score, primary }: { label: string; run: Evaluati
 function RunBanners({ run }: { run: EvaluationRun }) {
   const gross = run.final_score.gross_error;
   const clearedByDecision = run.score.gross_error && !gross;
-  const reasons = run.review_reasons.filter((reason) => reason !== STUB_FLAG);
-  const errors = [...new Set(run.log.attempts.flatMap((attempt) => attempt.errors))];
+  const reasons = reviewNotes(run.review_reasons);
+  const attemptErrors = [...new Set(run.log.attempts.flatMap((attempt) => attempt.errors))];
   return (
     <div className="space-y-2">
       {gross && (
@@ -67,7 +76,7 @@ function RunBanners({ run }: { run: EvaluationRun }) {
       )}
       {clearedByDecision && <Banner tone="info" title="Грубая ошибка снята решением проверяющего" />}
       {run.status === 'failed' && (
-        <Banner tone="warn" title="Оценка не выполнена">{errors.join('; ') || 'Причина не указана.'}</Banner>
+        <Banner tone="warn" title="Оценка не выполнена">{run.error || attemptErrors.join('; ') || 'Причина не указана.'}</Banner>
       )}
       {isStubRun(run) && (
         <Banner tone="warn" title="Результат провайдера-заглушки">Реальная модель не вызывалась, баллы только для проверки интерфейса.</Banner>
@@ -83,7 +92,7 @@ function ScorePanel({ run }: { run: EvaluationRun }) {
   const changed = run.score.total !== run.final_score.total || run.score.partial_total !== run.final_score.partial_total;
   // A missing criterion stays in the section denominator, so its numbers are a lower bound.
   const incomplete = new Set(
-    run.checklist.criteria.filter((item) => run.final_score.missing_criteria.includes(item.id)).map((item) => item.section),
+    (run.checklist?.criteria ?? []).filter((item) => run.final_score.missing_criteria.includes(item.id)).map((item) => item.section),
   );
   return (
     <section className="rounded border border-line bg-white p-3">
@@ -194,9 +203,9 @@ function CriterionCard({ run, criterion, appeals, onEvidence, onRange, onAppeal 
         </div>
       )}
 
-      {result.review_flags.filter((flag) => flag !== STUB_FLAG).length > 0 && (
+      {reviewNotes(result.review_flags).length > 0 && (
         <p className="mt-1.5 text-xs text-amber-800">
-          Флаг проверки: {result.review_flags.filter((flag) => flag !== STUB_FLAG).map(reasonLabel).join('; ')}
+          Флаг проверки: {reviewNotes(result.review_flags).map(reasonLabel).join('; ')}
         </p>
       )}
 
@@ -227,12 +236,13 @@ function RunLogDetails({ run }: { run: EvaluationRun }) {
   const { log } = run;
   const rows: [string, string][] = [
     ['run_id', log.run_id],
-    ['Чек-лист', `${run.checklist_id}, версия ${run.checklist_version}`],
+    ['Чек-лист', run.checklist ? `${run.checklist_id}, версия ${run.checklist_version}` : 'Не выбран'],
     ['content_hash', log.content_hash],
     ['checklist_hash', log.checklist_hash],
     ['prompt_hash', log.prompt_hash || '—'],
     ['Pipeline', log.pipeline],
-    ['Кэш', log.cache_hit ? 'Результат взят из кэша' : 'Новый запуск'],
+    ['Кэш', log.cache_hit ? `Результат взят из кэша${log.cached_from ? `, запуск ${log.cached_from}` : ''}` : 'Новый запуск'],
+    ['Оценщик', log.evaluator ? JSON.stringify(log.evaluator) : '—'],
     ['Задержка', log.latency_ms === null ? '—' : `${fmtNumber(log.latency_ms)} мс`],
     ['Стоимость', log.cost_usd === null ? '—' : `$${log.cost_usd}`],
   ];
@@ -275,12 +285,14 @@ function RunLogDetails({ run }: { run: EvaluationRun }) {
 
 function AppealDialog({
   run,
+  checklist,
   blocked,
   initial,
   onClose,
   onSaved,
 }: {
   run: EvaluationRun;
+  checklist: ChecklistVersion;
   blocked: Set<string>;
   initial: string;
   onClose: () => void;
@@ -308,7 +320,7 @@ function AppealDialog({
       <div className="space-y-3">
         <Field label="Критерий">
           <select className={inputClass} value={criterionId} onChange={(event) => setCriterionId(event.target.value)}>
-            {run.checklist.criteria.map((criterion) => (
+            {checklist.criteria.map((criterion) => (
               <option key={criterion.id} value={criterion.id} disabled={blocked.has(criterion.id)}>
                 {criterion.title}
                 {blocked.has(criterion.id) ? ' (уже на рассмотрении)' : ''}
@@ -347,11 +359,11 @@ function EvaluationPanel({
   conversation: ConversationDetail;
   onFocus: (focus: Omit<TurnFocus, 'nonce'> | string) => void;
 }) {
-  const appeals = useAsync(() => api.listAppeals(), [run.id]);
+  const appeals = useAsync(() => api.listAppeals({ evaluation_id: run.id }), [run.id]);
   const [appealFor, setAppealFor] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // The contract has no evaluation_id filter on GET /appeals, so this filters here.
+  // Kept on purpose: a backend without the evaluation_id parameter ignores it.
   const runAppeals = useMemo(
     () => (appeals.data ?? []).filter((item) => item.evaluation_id === run.id),
     [appeals.data, run.id],
@@ -379,7 +391,8 @@ function EvaluationPanel({
     });
   };
 
-  const defaultCriterion = run.checklist.criteria.find((item) => !blocked.has(item.id))?.id ?? '';
+  const checklist = run.checklist;
+  const defaultCriterion = checklist?.criteria.find((item) => !blocked.has(item.id))?.id ?? '';
 
   return (
     <div className="space-y-2 p-2">
@@ -388,17 +401,17 @@ function EvaluationPanel({
       {appeals.error && <p role="alert" className="text-red-700">Апелляции не загрузились: {appeals.error}</p>}
       {notice && <p role="status" className="rounded bg-brand-50 px-2 py-1 text-brand-800">{notice}</p>}
 
-      {run.status === 'done' && (
+      {run.status === 'done' && checklist && (
         <div className="flex justify-end">
           <Button onClick={() => setAppealFor(defaultCriterion)} disabled={!defaultCriterion}>Подать апелляцию</Button>
         </div>
       )}
 
-      {run.final_results.length === 0 ? (
+      {run.final_results.length === 0 || !checklist ? (
         <EmptyState title="Результатов по критериям нет">Запустите оценку повторно.</EmptyState>
       ) : (
-        run.checklist.sections.map((section) => {
-          const criteria = run.checklist.criteria.filter((item) => item.section === section.id);
+        checklist.sections.map((section) => {
+          const criteria = checklist.criteria.filter((item) => item.section === section.id);
           if (!criteria.length) return null;
           return (
             <section key={section.id} className="space-y-1.5">
@@ -421,9 +434,10 @@ function EvaluationPanel({
 
       <RunLogDetails run={run} />
 
-      {appealFor !== null && (
+      {appealFor !== null && checklist && (
         <AppealDialog
           run={run}
+          checklist={checklist}
           blocked={blocked}
           initial={appealFor}
           onClose={() => setAppealFor(null)}
@@ -452,6 +466,7 @@ function ConversationView({ id }: { id: string }) {
   const [focus, setFocus] = useState<TurnFocus | null>(null);
   const [focusError, setFocusError] = useState<string | null>(null);
   const [audioNotice, setAudioNotice] = useState<string | null>(null);
+  const [comparing, setComparing] = useState(false);
 
   const runId = chosenRun ?? conversation.data?.latest_evaluation_id ?? null;
   const run = useAsync(() => (runId ? api.getEvaluation(runId) : Promise.resolve(null)), [runId, revision]);
@@ -468,6 +483,7 @@ function ConversationView({ id }: { id: string }) {
   if (conversation.error) return <ErrorState message={conversation.error} onRetry={conversation.reload} />;
   if (!conversation.data) return <LoadingState label="Загружаем диалог…" />;
   const detail = conversation.data;
+  const doneRuns = (history.data ?? []).filter((item) => item.status === 'done');
 
   const openAudio = () => {
     const url = api.audioUrl(detail.id);
@@ -494,11 +510,12 @@ function ConversationView({ id }: { id: string }) {
           >
             {history.data?.map((item) => (
               <option key={item.id} value={item.id}>
-                Итог {fmtNumber(item.final_total)}, v{item.checklist_version}, {fmtDate(item.created_at)}, {item.checklist_id}
+                {runLabel(item)}
               </option>
             ))}
           </select>
         )}
+        {doneRuns.length >= 2 && <Button onClick={() => setComparing(true)}>Сравнить запуски</Button>}
         <div className="ml-auto">
           <RunEvaluation conversationIds={[detail.id]} channels={[detail.channel]} buttonLabel="Оценить" />
         </div>
@@ -521,6 +538,7 @@ function ConversationView({ id }: { id: string }) {
           )}
         </section>
       </div>
+      {comparing && <CompareDialog runs={doneRuns} onClose={() => setComparing(false)} />}
     </div>
   );
 }

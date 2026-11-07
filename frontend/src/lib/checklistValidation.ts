@@ -27,6 +27,16 @@ function checkCriterion(criterion: Criterion, sectionIds: Set<string>): string[]
   return issues;
 }
 
+const CHECKLIST_ID = /^[a-z0-9][a-z0-9_-]*$/;
+
+/** Only a new checklist has an editable id. Existing ones keep theirs. */
+export function validateNewChecklistId(id: string, taken: string[]): ValidationIssue[] {
+  if (!CHECKLIST_ID.test(id)) {
+    return [{ criterionId: null, message: 'Идентификатор: латиница в нижнем регистре, цифры, дефис, подчёркивание' }];
+  }
+  return taken.includes(id) ? [{ criterionId: null, message: 'Чек-лист с таким идентификатором уже есть' }] : [];
+}
+
 export function validateChecklist(checklist: ChecklistVersion): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   if (!checklist.title.trim()) issues.push({ criterionId: null, message: 'Нужно название чек-листа' });

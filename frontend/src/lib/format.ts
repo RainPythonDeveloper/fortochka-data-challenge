@@ -1,4 +1,4 @@
-import type { Answer, ChecklistVersion, Criterion, EvaluationRun, ResultStatus } from '../api/types';
+import type { Answer, ChecklistVersion, Criterion, EvaluationRun, EvaluationSummary, ResultStatus } from '../api/types';
 
 export const fmtNumber = (value: number | null | undefined) =>
   value === null || value === undefined ? '—' : value.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
@@ -53,15 +53,45 @@ export function answerTone(criterion: Criterion | undefined, status: ResultStatu
 const reasonLabels: Record<string, string> = {
   mock_provider: 'Провайдер-заглушка: реальная модель не вызывалась',
   borderline_scale: 'Граница ступеней шкалы',
+  channel_not_in_checklist: 'Чек-лист не рассчитан на канал этого диалога',
 };
 export const reasonLabel = (reason: string) => reasonLabels[reason] ?? reason;
 
 export const STUB_FLAG = 'mock_provider';
+
+// These have their own place on the card: a stub banner, a failure banner, a decision block.
+const SEPARATELY_SHOWN = new Set([STUB_FLAG, 'evaluation_failed', 'manual_decision']);
+export const reviewNotes = (items: string[]) => items.filter((item) => !SEPARATELY_SHOWN.has(item));
+
+/** The backend mixes warnings into ImportResult.errors with a `warning:` prefix. */
+export function splitImportMessages(items: string[]): { warnings: string[]; errors: string[] } {
+  const prefix = 'warning:';
+  return {
+    warnings: items.filter((item) => item.startsWith(prefix)).map((item) => item.slice(prefix.length).trim()),
+    errors: items.filter((item) => !item.startsWith(prefix)),
+  };
+}
 
 export const isStubRun = (run: EvaluationRun) =>
   run.review_reasons.includes(STUB_FLAG) ||
   run.results.some((result) => result.review_flags.includes(STUB_FLAG)) ||
   run.log.attempts.some((attempt) => attempt.provider === 'mock');
 
-export const criterionTitle = (checklist: ChecklistVersion, id: string) =>
-  checklist.criteria.find((criterion) => criterion.id === id)?.title ?? id;
+export const criterionTitle = (checklist: ChecklistVersion | null, id: string) =>
+  checklist?.criteria.find((criterion) => criterion.id === id)?.title ?? id;
+
+/** Answer without its criterion, for the run comparison where only raw values are known. */
+export function plainAnswer(status: ResultStatus, answer: Answer): string {
+  if (status !== 'assessed') return statusLabel(status);
+  return answer === 'yes' ? 'Да' : answer === 'no' ? 'Нет' : String(answer ?? '—');
+}
+
+export const runLabel = (run: EvaluationSummary) =>
+  [
+    run.status === 'failed' ? 'Сбой' : `Итог ${fmtNumber(run.final_total)}`,
+    run.checklist_id ? `v${run.checklist_version}` : 'без чек-листа',
+    fmtDate(run.created_at),
+    run.checklist_id,
+  ]
+    .filter(Boolean)
+    .join(', ');

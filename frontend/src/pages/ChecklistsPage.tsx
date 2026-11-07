@@ -2,11 +2,32 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { ChecklistVersion, Criterion, CriterionType } from '../api/types';
 import { Badge, Banner, Button, EmptyState, ErrorState, Field, LoadingState, inputClass } from '../components/ui';
-import { normalizeChecklist, validateChecklist, type ValidationIssue } from '../lib/checklistValidation';
+import {
+  normalizeChecklist,
+  validateChecklist,
+  validateNewChecklistId,
+  type ValidationIssue,
+} from '../lib/checklistValidation';
 import { channelLabel, fmtNumber } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 
 const KNOWN_CHANNELS = ['agent chat', 'voice call'];
+
+const blankChecklist = (taken: string[]): ChecklistVersion => ({
+  checklist_id: nextId(taken, 'checklist-', 1),
+  version: 1,
+  title: '',
+  channels: ['agent chat'],
+  excluded_from_scoring: [],
+  sections: [{ id: 's1', title: 'Основная секция' }],
+  criteria: [],
+});
+
+function copyOf(source: ChecklistVersion, taken: string[]): ChecklistVersion {
+  let id = `${source.checklist_id}-copy`;
+  for (let number = 2; taken.includes(id); number += 1) id = `${source.checklist_id}-copy-${number}`;
+  return { ...structuredClone(source), checklist_id: id, version: 1, title: `${source.title} (копия)` };
+}
 
 function nextId(taken: string[], prefix: string, width: number): string {
   let number = taken.length + 1;
@@ -176,14 +197,27 @@ function CriterionEditor({
   );
 }
 
-function Editor({ base, latestVersion, onSaved }: { base: ChecklistVersion; latestVersion: number; onSaved: (saved: ChecklistVersion) => void }) {
+type EditorProps = {
+  base: ChecklistVersion;
+  /** Null for a checklist that does not exist yet: saving then creates it as v1. */
+  latestVersion: number | null;
+  takenIds: string[];
+  onSaved: (saved: ChecklistVersion) => void;
+  onCancel?: () => void;
+};
+
+function Editor({ base, latestVersion, takenIds, onSaved, onCancel }: EditorProps) {
+  const isNew = latestVersion === null;
   const [draft, setDraft] = useState(base);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const issues = useMemo(() => validateChecklist(draft), [draft]);
-  const dirty = JSON.stringify(normalizeChecklist(draft)) !== JSON.stringify(normalizeChecklist(base));
+  const issues = useMemo(
+    () => [...(isNew ? validateNewChecklistId(draft.checklist_id, takenIds) : []), ...validateChecklist(draft)],
+    [draft, isNew, takenIds],
+  );
+  const dirty = isNew || JSON.stringify(normalizeChecklist(draft)) !== JSON.stringify(normalizeChecklist(base));
   const weightSum = draft.criteria.reduce((sum, item) => sum + (item.scored && Number.isFinite(item.weight) ? item.weight : 0), 0);
   const channels = [...new Set([...KNOWN_CHANNELS, ...draft.channels])];
 
@@ -219,7 +253,8 @@ function Editor({ base, latestVersion, onSaved }: { base: ChecklistVersion; late
     setBusy(true);
     setError(null);
     try {
-      onSaved(await api.createChecklistVersion(normalizeChecklist(draft)));
+      const body = normalizeChecklist(draft);
+      onSaved(await (isNew ? api.createChecklist(body) : api.createChecklistVersion(body)));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Версия не сохранена');
       setBusy(false);
@@ -230,14 +265,17 @@ function Editor({ base, latestVersion, onSaved }: { base: ChecklistVersion; late
     <div className="space-y-3">
       <div className="sticky top-0 z-10 flex items-center gap-3 rounded border border-line bg-white px-3 py-2">
         <span className="text-stone-600">
-          Основа: v{base.version}. Сохранение создаст v{latestVersion + 1}, прежние версии не меняются.
+          {isNew
+            ? 'Новый чек-лист. Сохранение создаст версию v1.'
+            : `Основа: v${base.version}. Сохранение создаст v${latestVersion + 1}, прежние версии не меняются.`}
         </span>
         <span className={`tabular-nums ${weightSum === 100 ? 'text-stone-500' : 'text-amber-800'}`}>
           Сумма весов: {fmtNumber(weightSum)}
         </span>
         <span className="ml-auto text-stone-500">{dirty ? 'Есть несохранённые изменения' : 'Изменений нет'}</span>
+        {onCancel && <Button onClick={onCancel}>Отмена</Button>}
         <Button variant="primary" disabled={busy || !dirty || issues.length > 0} onClick={save}>
-          {busy ? 'Сохранение…' : 'Сохранить новую версию'}
+          {busy ? 'Сохранение…' : isNew ? 'Создать чек-лист' : 'Сохранить новую версию'}
         </Button>
       </div>
 
@@ -253,8 +291,18 @@ function Editor({ base, latestVersion, onSaved }: { base: ChecklistVersion; late
       )}
 
       <section className="space-y-2 rounded border border-line bg-white p-3">
+        {isNew && (
+          <Field label="Идентификатор чек-листа">
+            <input
+              aria-label="Идентификатор чек-листа"
+              className={inputClass}
+              value={draft.checklist_id}
+              onChange={(event) => setDraft({ ...draft, checklist_id: event.target.value.trim() })}
+            />
+          </Field>
+        )}
         <Field label="Название чек-листа">
-          <input className={inputClass} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
+          <input aria-label="Название чек-листа" className={inputClass} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
         </Field>
         <div className="flex items-center gap-4">
           <span className="text-xs font-medium text-stone-600">Каналы</span>
@@ -273,6 +321,18 @@ function Editor({ base, latestVersion, onSaved }: { base: ChecklistVersion; late
               {channelLabel(channel)}
             </label>
           ))}
+          <input
+            aria-label="Другой канал"
+            placeholder="Другой канал, Enter"
+            className={`${inputClass} !w-44`}
+            onKeyDown={(event) => {
+              const value = event.currentTarget.value.trim();
+              if (event.key !== 'Enter' || !value) return;
+              event.preventDefault();
+              if (!draft.channels.includes(value)) setDraft({ ...draft, channels: [...draft.channels, value] });
+              event.currentTarget.value = '';
+            }}
+          />
         </div>
         {draft.excluded_from_scoring.length > 0 && (
           <p className="text-xs text-stone-500">Вне оценки: {draft.excluded_from_scoring.join(', ')}</p>
@@ -356,6 +416,7 @@ export function ChecklistsPage() {
   const list = useAsync(() => api.listChecklists(), []);
   const [selected, setSelected] = useState<{ id: string; version: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [draftNew, setDraftNew] = useState<{ base: ChecklistVersion; nonce: number } | null>(null);
 
   useEffect(() => {
     const first = list.data?.[0];
@@ -367,11 +428,34 @@ export function ChecklistsPage() {
     [selected?.id, selected?.version],
   );
   const summary = list.data?.find((item) => item.checklist_id === selected?.id);
+  const takenIds = useMemo(() => (list.data ?? []).map((item) => item.checklist_id), [list.data]);
+
+  const startNew = (base: ChecklistVersion) => {
+    setNotice(null);
+    setDraftNew((current) => ({ base, nonce: (current?.nonce ?? 0) + 1 }));
+  };
+
+  const onSaved = (saved: ChecklistVersion) => {
+    setNotice(`Сохранена версия v${saved.version}. Её можно выбрать при запуске оценки.`);
+    setDraftNew(null);
+    setSelected({ id: saved.checklist_id, version: saved.version });
+    list.reload();
+  };
 
   return (
     <div className="mx-auto grid h-full max-w-[1400px] grid-cols-[260px_minmax(0,1fr)]">
       <aside className="min-h-0 overflow-y-auto border-r border-line bg-white p-3">
         <h1 className="mb-2 text-base font-semibold">Чек-листы</h1>
+        <div className="mb-3 flex gap-1">
+          <Button disabled={!list.data} onClick={() => startNew(blankChecklist(takenIds))}>Новый</Button>
+          <Button
+            disabled={!version.data}
+            title="Новый чек-лист на основе открытой версии"
+            onClick={() => version.data && startNew(copyOf(version.data, takenIds))}
+          >
+            Копия открытого
+          </Button>
+        </div>
         {list.error ? (
           <ErrorState message={list.error} onRetry={list.reload} />
         ) : !list.data ? (
@@ -389,9 +473,10 @@ export function ChecklistsPage() {
                     <Button
                       key={value}
                       className="!h-6"
-                      variant={selected?.id === item.checklist_id && selected.version === value ? 'primary' : 'secondary'}
+                      variant={!draftNew && selected?.id === item.checklist_id && selected.version === value ? 'primary' : 'secondary'}
                       onClick={() => {
                         setNotice(null);
+                        setDraftNew(null);
                         setSelected({ id: item.checklist_id, version: value });
                       }}
                     >
@@ -406,7 +491,16 @@ export function ChecklistsPage() {
       </aside>
       <div className="min-h-0 overflow-y-auto p-3">
         {notice && <p role="status" className="mb-2 rounded bg-brand-50 px-2 py-1 text-brand-800">{notice}</p>}
-        {version.error ? (
+        {draftNew ? (
+          <Editor
+            key={`new:${draftNew.nonce}`}
+            base={draftNew.base}
+            latestVersion={null}
+            takenIds={takenIds}
+            onSaved={onSaved}
+            onCancel={() => setDraftNew(null)}
+          />
+        ) : version.error ? (
           <ErrorState message={version.error} onRetry={version.reload} />
         ) : !version.data || version.loading || !summary ? (
           list.error ? null : <LoadingState label="Загружаем чек-лист…" />
@@ -415,11 +509,8 @@ export function ChecklistsPage() {
             key={`${version.data.checklist_id}:${version.data.version}`}
             base={version.data}
             latestVersion={summary.latest_version}
-            onSaved={(saved) => {
-              setNotice(`Сохранена версия v${saved.version}. Её можно выбрать при запуске оценки.`);
-              setSelected({ id: saved.checklist_id, version: saved.version });
-              list.reload();
-            }}
+            takenIds={takenIds}
+            onSaved={onSaved}
           />
         )}
       </div>

@@ -122,6 +122,10 @@ export const seedConversations: ConversationDetail[] = [
     ],
     true,
   ),
+  conversation('mock-web-001', 'web form', 'RU', [
+    ['00:00', 'client', 'Оставляю заявку через условную форму на сайте.'],
+    ['00:30', 'operator', 'Здравствуйте! Меня зовут Жанна. Заявку получила, спасибо.'],
+  ]),
 ];
 
 /** Only appear after an import, so the import button has a visible effect. */

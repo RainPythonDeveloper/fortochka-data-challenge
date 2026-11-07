@@ -126,7 +126,7 @@ function AppealDetail({ appeal, onDecided }: { appeal: Appeal; onDecided: () => 
   if (!run.data) return <LoadingState label="Загружаем спорную оценку…" />;
 
   const data = run.data;
-  const criterion = data.checklist.criteria.find((item) => item.id === appeal.criterion_id);
+  const criterion = data.checklist?.criteria.find((item) => item.id === appeal.criterion_id);
   const original = data.results.find((item) => item.criterion_id === appeal.criterion_id);
   const originalScore = data.score.criteria.find((item) => item.criterion_id === appeal.criterion_id);
   if (!criterion || !original) return <ErrorState message="Критерия апелляции нет в запуске оценки." />;

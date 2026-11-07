@@ -4,6 +4,7 @@
 export type HostAdapter = {
   apiBaseUrl: () => string;
   openExternal: (url: string) => void;
+  saveFile: (name: string, content: string, type: string) => void;
   currentUserName: () => string | null;
 };
 
@@ -19,6 +20,14 @@ const browserAdapter: HostAdapter = {
     (window.__CQA_CONFIG__?.apiBaseUrl ?? import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/+$/, ''),
   openExternal: (url) => {
     window.open(url, '_blank', 'noopener');
+  },
+  saveFile: (name, content, type) => {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(url);
   },
   currentUserName: () => null,
 };

@@ -5,12 +5,14 @@ import { JobsProvider } from './lib/jobs';
 import { ChecklistsPage } from './pages/ChecklistsPage';
 import { ConversationPage } from './pages/ConversationPage';
 import { ConversationsPage } from './pages/ConversationsPage';
+import { ReportPage } from './pages/ReportPage';
 import { ReviewPage } from './pages/ReviewPage';
 
 const navItems = [
   { to: '/conversations', label: 'Диалоги' },
   { to: '/checklists', label: 'Чек-листы' },
   { to: '/review', label: 'Очередь проверки' },
+  { to: '/report', label: 'Отчёт' },
 ];
 
 export default function App() {
@@ -46,6 +48,7 @@ export default function App() {
             <Route path="/conversations/:id" element={<ConversationPage />} />
             <Route path="/checklists" element={<ChecklistsPage />} />
             <Route path="/review" element={<ReviewPage />} />
+            <Route path="/report" element={<ReportPage />} />
             <Route path="*" element={<Navigate to="/conversations" replace />} />
           </Routes>
         </main>

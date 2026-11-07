@@ -93,7 +93,7 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 export const inputClass =
   'w-full rounded border border-line bg-white px-2 py-1 text-[13px] outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Modal({ title, wide, onClose, children }: { title: string; wide?: boolean; onClose: () => void; children: ReactNode }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -105,7 +105,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-lg rounded-md bg-white p-4 shadow-lg"
+        className={`max-h-full w-full overflow-y-auto rounded-md bg-white p-4 shadow-lg ${wide ? 'max-w-4xl' : 'max-w-lg'}`}
         onClick={(event) => event.stopPropagation()}
       >
         <h2 className="mb-3 text-sm font-semibold">{title}</h2>
