@@ -12,6 +12,8 @@
 data/
 *.sqlite
 *.sqlite3
+*.sqlite-shm
+*.sqlite-wal
 *.db
 
 # Python
