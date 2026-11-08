@@ -299,6 +299,28 @@ label:has(input) {
 .verdict[data-verdict='mid'] { color: var(--color-amber-text); }
 .verdict[data-verdict='high'] { color: var(--color-green-text); }
 
+/* In the list the verdict is a small banner, tinted by its type. */
+.drow .verdict {
+  height: 24px;
+  padding: 0 10px 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.drow .verdict::before {
+  width: 7px;
+  height: 7px;
+}
+
+.drow .verdict[data-verdict='critical'],
+.score .verdict[data-verdict='critical'] { background: var(--color-red-soft); }
+.drow .verdict[data-verdict='low'],
+.score .verdict[data-verdict='low'] { background: #fbeae2; }
+.drow .verdict[data-verdict='mid'],
+.score .verdict[data-verdict='mid'] { background: var(--color-amber-soft); }
+.drow .verdict[data-verdict='high'],
+.score .verdict[data-verdict='high'] { background: var(--color-green-soft); }
+
 .badge {
   display: inline-block;
   padding: 3px 10px;
@@ -953,7 +975,7 @@ label:has(input) {
 
 .drow {
   display: grid;
-  grid-template-columns: 132px 60px 104px 68px 92px minmax(0, 1fr) 76px;
+  grid-template-columns: 132px 60px 104px 68px 108px minmax(0, 1fr) 76px;
   align-items: center;
   gap: 16px;
   height: 54px;
@@ -2606,7 +2628,7 @@ mark.quote {
   }
 
   .drow {
-    grid-template-columns: 120px 56px 100px 64px 88px 200px 76px;
+    grid-template-columns: 120px 56px 100px 64px 104px 200px 76px;
     width: max-content;
   }
 
