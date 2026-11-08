@@ -156,8 +156,8 @@ def _mock_results(
 
 def _blocked(checklist: ChecklistVersion, config: EvaluatorConfig) -> EvaluationOutput:
     reason = (
-        "Звонок не отправлен в модель: в нём есть персональные данные, а бесплатный API "
-        f"записывает запросы. Разрешить отправку можно настройкой {_ALLOW_PERSONAL_DATA}=1."
+        "Звонок не отправлен в модель: отправка звонков в облако выключена "
+        f"({_ALLOW_PERSONAL_DATA}=0). Включить: {_ALLOW_PERSONAL_DATA}=1."
     )
     return EvaluationOutput(
         results=[
@@ -258,7 +258,9 @@ async def evaluate(
 def _may_send_personal_data(provider: Any) -> bool:
     if getattr(provider, "allows_personal_data", False):
         return True
-    return os.environ.get(_ALLOW_PERSONAL_DATA) == "1"
+    # Calls go to the configured model by default: they arrive as transcripts and are
+    # scored like chats. CQA_ALLOW_VOICE_TO_CLOUD=0 keeps them on local providers only.
+    return os.environ.get(_ALLOW_PERSONAL_DATA, "1").strip() != "0"
 
 
 def _provider_or_raise(name: str) -> Any:

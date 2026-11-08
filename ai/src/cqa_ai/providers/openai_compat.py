@@ -24,7 +24,7 @@ from cqa_ai.providers.profiles import ProviderProfile, paid_equivalent_usd
 from cqa_ai.providers.ratelimit import DailyLimitExhausted, limiter_for
 
 # Free endpoints are reported to hang for minutes, so a stuck call must end.
-DEFAULT_TIMEOUT_SECONDS = 240.0
+DEFAULT_TIMEOUT_SECONDS = 420.0
 
 # (provider, model) -> accepted mode
 _accepted_mode: dict[tuple[str, str], str] = {}

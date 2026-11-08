@@ -125,9 +125,9 @@ def test_missing_key_is_reported_as_not_configured(chat, checklist, monkeypatch)
         asyncio.run(evaluate(chat, checklist, EvaluatorConfig(provider="nvidia", model="m")))
 
 
-def test_real_calls_are_not_sent_unless_allowed(call, monkeypatch):
+def test_calls_are_not_sent_when_switched_off(call, monkeypatch):
     monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
-    monkeypatch.delenv("CQA_ALLOW_VOICE_TO_CLOUD", raising=False)
+    monkeypatch.setenv("CQA_ALLOW_VOICE_TO_CLOUD", "0")
     voice = load_default_checklists()[1]
     output = asyncio.run(evaluate(call, voice, EvaluatorConfig(provider="nvidia", model="m")))
     assert not output.attempts
