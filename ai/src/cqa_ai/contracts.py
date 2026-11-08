@@ -234,7 +234,7 @@ class EvaluatorConfig(BaseModel):
     fallback_model: str | None = None
     pipeline: str = "single"
     temperature: float | None = 0
-    max_output_tokens: int = 8000
+    max_output_tokens: int = 64000
     # Ensembles (W5). `provider:model` strings; empty means "not used".
     second_model: str | None = None
     arbiter_model: str | None = None

@@ -31,7 +31,8 @@ def seen(monkeypatch):
     monkeypatch.setattr(strategies, "run_single", fake_single)
     monkeypatch.setenv("NVIDIA_API_KEY", "x")
     monkeypatch.delenv("LLM_FALLBACK_MODEL", raising=False)
-    monkeypatch.delenv("CQA_ALLOW_VOICE_TO_CLOUD", raising=False)
+    # Strict mode: calls stay on local providers. The default is checked separately.
+    monkeypatch.setenv("CQA_ALLOW_VOICE_TO_CLOUD", "0")
     return calls
 
 
@@ -60,6 +61,12 @@ def test_call_on_cloud_without_local_is_blocked_not_sent(seen, call):
     assert seen == []
     assert all(r.status is ResultStatus.FAILED for r in output.results)
     assert "personal_data_not_sent" in output.review_reasons
+
+
+def test_calls_go_to_the_cloud_model_by_default(seen, call, monkeypatch):
+    monkeypatch.delenv("CQA_ALLOW_VOICE_TO_CLOUD", raising=False)
+    run(call, voice(), model="google/gemma-4-31b-it", fallback_model="")
+    assert seen[0]["provider"] == "nvidia"
 
 
 def test_explicit_switch_allows_the_cloud(seen, call, monkeypatch):

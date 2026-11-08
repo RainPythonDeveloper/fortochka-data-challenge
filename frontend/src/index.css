@@ -2766,3 +2766,17 @@ mark.quote {
 .appeal-link {
   white-space: nowrap;
 }
+
+/* Narrow windows (a projector or a split screen): wrap labels instead of cutting them. */
+@media (max-width: 1100px) {
+  .tile__label {
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  .drow__note > span:first-child {
+    overflow: visible;
+    white-space: normal;
+    line-height: 1.25;
+  }
+}

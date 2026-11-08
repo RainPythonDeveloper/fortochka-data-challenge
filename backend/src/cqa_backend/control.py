@@ -23,7 +23,7 @@ import httpx
 from cqa_ai import EvaluatorNotConfigured
 from dotenv import load_dotenv
 
-from cqa_backend import checklists, conversations, exports
+from cqa_backend import checklists, conversations, exports, results_file
 from cqa_backend.app import build_service
 from cqa_backend.config import MOCK_PROVIDER, REPO_ROOT, Settings, resolve_evaluator_config
 from cqa_backend.db import Database
@@ -33,6 +33,9 @@ from cqa_backend.redact import redact
 from cqa_backend.schemas import EvaluationRequest
 
 ERROR_PREVIEW = 120
+
+
+PROD_RESULTS = REPO_ROOT / "results" / "prod" / "results.json"
 
 
 class ControlError(Exception):
@@ -50,6 +53,7 @@ class ControlOptions:
     out_dir: Path | None = None
     force: bool = False
     allow_mock: bool = False
+    results_file: Path | None = None
 
 
 @dataclass
@@ -69,6 +73,7 @@ class ControlReport:
     warnings: list[str] = field(default_factory=list)
     json_path: Path | None = None
     csv_path: Path | None = None
+    results_path: Path | None = None
 
     @property
     def ok(self) -> bool:
@@ -239,6 +244,12 @@ async def run_control(
         item for item in imported.conversation_ids if item not in report.incomplete
     ]
     report.json_path, report.csv_path = write_exports(db, options, out_dir)
+    if options.results_file:
+        data = results_file.write(db, options.group_id, options.results_file)
+        report.results_path = options.results_file
+        report.warnings += [
+            f"results.json: {item}" for item in results_file.check(data, options.expected_records)
+        ]
     _collect_usage(service, report, job_ids)
     report.seconds = round(time.perf_counter() - started, 1)
     return report
@@ -259,6 +270,7 @@ def format_report(report: ControlReport) -> str:
         f"Стоимость: {cost}",
         f"JSON: {report.json_path}",
         f"CSV: {report.csv_path}",
+        *([f"Файл для сдачи: {report.results_path}"] if report.results_path else []),
     ]
     lines += [f"Предупреждение: {item}" for item in report.warnings]
     lines += [
@@ -285,7 +297,22 @@ def parse_args(argv: list[str] | None = None) -> ControlOptions:
     parser.add_argument("--out-dir", type=Path, help="по умолчанию data/control/<группа>-<время>")
     parser.add_argument("--force", action="store_true", help="не брать результаты из кэша")
     parser.add_argument("--allow-mock", action="store_true", help="разрешить заглушку")
+    parser.add_argument(
+        "--results-file",
+        type=Path,
+        help="файл для сдачи в формате организаторов; для контрольной группы по умолчанию "
+        "results/prod/results.json, для DEV не пишется без этого флага",
+    )
+    parser.add_argument(
+        "--no-results-file", action="store_true", help="не писать файл для сдачи"
+    )
     values = vars(parser.parse_args(argv))
+    # The control group writes the submission file without a flag. DEV never does by
+    # default: a rehearsal must not overwrite the DEV file that is already submitted.
+    if values.pop("no_results_file"):
+        values["results_file"] = None
+    elif values["results_file"] is None and values["group_id"].strip().upper() != "DEV":
+        values["results_file"] = PROD_RESULTS
     pairs = values.pop("checklist_for") or []
     if pairs and values["checklist_id"]:
         parser.error("--checklist-for нельзя сочетать с --checklist-id")

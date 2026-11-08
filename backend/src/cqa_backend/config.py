@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # Free cloud tiers limit the request rate: 3 slots, 3 seconds between model starts.
     cqa_eval_concurrency: int = Field(default=3, ge=1)
     cqa_eval_pause_s: float = Field(default=3, ge=0)
-    cqa_eval_timeout_s: float = Field(default=600, gt=0)
+    cqa_eval_timeout_s: float = Field(default=1500, gt=0)
     cqa_allow_mock: bool = False
 
     llm_provider: str | None = None
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     llm_pipeline: str = "single"
     llm_second_model: str | None = None
     # Reasoning models spend many tokens before the JSON; 8000 can truncate it.
-    llm_max_output_tokens: int = Field(default=8000, ge=1000)
+    llm_max_output_tokens: int = Field(default=64000, ge=1000)
     llm_arbiter_model: str | None = None
     llm_second_criteria: str | None = None
 

@@ -32,6 +32,44 @@ _PERSONAL_DATA_CHANNELS = {"voice call"}
 _ALLOW_PERSONAL_DATA = "CQA_ALLOW_VOICE_TO_CLOUD"
 
 
+# Labels of the organizers' API. A new source may name them differently ("call",
+# "agent", "клиент"): such labels are mapped onto the known ones so the right
+# checklist and the code facts still apply. Only labels change, never the text.
+CHANNELS = ("agent chat", "voice call")
+ROLES = ("client", "operator", "bot", "system")
+_CHANNEL_HINTS = (
+    ("voice call", ("voice", "call", "phone", "audio", "звон", "телефон", "аудио", "қоңырау")),
+    ("agent chat", ("chat", "message", "чат", "переписк", "сообщен")),
+)
+_ROLE_ALIASES = {
+    "operator": ("operator", "agent", "employee", "specialist", "support", "manager",
+                 "оператор", "сотрудник", "специалист", "менеджер", "консультант"),
+    "client": ("client", "customer", "user", "caller", "клиент", "абонент", "пользователь", "клиентка"),
+    "bot": ("bot", "ivr", "assistant", "бот", "автоответчик"),
+    "system": ("system", "event", "система", "событие"),
+}
+
+
+def normalize_channel(channel: str) -> str:
+    """Known channel for a label such as "Voice Call" or "call"; unknown labels stay as they are."""
+    key = channel.strip().lower()
+    if key in CHANNELS:
+        return key
+    for known, hints in _CHANNEL_HINTS:
+        if any(hint in key for hint in hints):
+            return known
+    return channel
+
+
+def normalize_speaker(speaker: str) -> str:
+    """Known role for a label such as "Agent" or "клиент"; unknown labels stay as they are."""
+    key = speaker.strip().lower()
+    for role, aliases in _ROLE_ALIASES.items():
+        if key in aliases:
+            return role
+    return speaker
+
+
 class EvaluatorNotConfigured(RuntimeError):
     """The requested provider cannot run, usually because a key is missing."""
 
@@ -42,14 +80,14 @@ def snapshot_from_record(record: dict[str, Any]) -> ConversationSnapshot:
         Turn(
             index=index,
             timestamp=str(turn.get("timestamp", "")),
-            speaker=str(turn.get("speaker", "")),
+            speaker=normalize_speaker(str(turn.get("speaker", ""))),
             text=str(turn.get("text", "")),
         )
         for index, turn in enumerate(record["transcript"])
     ]
     return ConversationSnapshot(
         conversation_id=record["conversation_id"],
-        channel=record["channel"],
+        channel=normalize_channel(record["channel"]),
         language=record["language"],
         turns=turns,
         audio_url=record.get("audio_url"),
@@ -118,8 +156,8 @@ def _mock_results(
 
 def _blocked(checklist: ChecklistVersion, config: EvaluatorConfig) -> EvaluationOutput:
     reason = (
-        "Звонок не отправлен в модель: в нём есть персональные данные, а бесплатный API "
-        f"записывает запросы. Разрешить отправку можно настройкой {_ALLOW_PERSONAL_DATA}=1."
+        "Звонок не отправлен в модель: оценка звонков настроенной моделью выключена "
+        f"({_ALLOW_PERSONAL_DATA}=0). Включить: {_ALLOW_PERSONAL_DATA}=1."
     )
     return EvaluationOutput(
         results=[
@@ -220,7 +258,9 @@ async def evaluate(
 def _may_send_personal_data(provider: Any) -> bool:
     if getattr(provider, "allows_personal_data", False):
         return True
-    return os.environ.get(_ALLOW_PERSONAL_DATA) == "1"
+    # Calls are scored by the configured model by default: they arrive as transcripts,
+    # like chats. CQA_ALLOW_VOICE_TO_CLOUD=0 keeps them on local providers only.
+    return os.environ.get(_ALLOW_PERSONAL_DATA, "1").strip() != "0"
 
 
 def _provider_or_raise(name: str) -> Any:

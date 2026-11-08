@@ -39,7 +39,7 @@ curl -X POST localhost:8000/imports -H 'content-type: application/json' -d '{"gr
 | `LLM_FALLBACK_MODEL` | нет | Запасная модель, входит в ключ кэша |
 | `LLM_PIPELINE` | `single` | Схема оценки, входит в ключ кэша |
 | `NVIDIA_API_KEY` | нет | Ключ провайдера, его читает `cqa_ai`. Маскируется в логах и ошибках |
-| `CQA_ALLOW_VOICE_TO_CLOUD` | выключено | `1` разрешает отправлять звонки в облачную модель. Без него звонки получают `failed` с причиной `personal_data_not_sent` |
+| `CQA_ALLOW_VOICE_TO_CLOUD` | `1` | Звонки оценивает настроенная модель. `0`: только локальная модель, иначе `failed` с причиной `personal_data_not_sent` |
 
 Заглушка работает только при `CQA_ALLOW_MOCK=1`, даже если указано `LLM_PROVIDER=mock`. Если провайдер задан, заглушка не подставляется: при сбое диалог получает статус `failed`.
 

@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 
 import httpx
-from cqa_ai import content_hash, snapshot_from_record
+from cqa_ai import content_hash, normalize_channel, normalize_speaker, snapshot_from_record
 from cqa_ai.contracts import ConversationSnapshot
 from pydantic import ValidationError
 
@@ -52,6 +52,7 @@ def check_record(record: Any) -> list[str]:
     fields = set(record) - KNOWN_RECORD_FIELDS
     turn_fields: set[str] = set()
     roles: set[str] = set()
+    mapped: set[str] = set()
     for index, turn in enumerate(transcript):
         if not isinstance(turn, dict):
             raise RecordError(f"реплика {index} не является объектом")
@@ -61,7 +62,11 @@ def check_record(record: Any) -> list[str]:
             raise RecordError(f"реплика {index}: нет метки времени")
         turn_fields |= set(turn) - KNOWN_TURN_FIELDS
         if turn["speaker"] not in KNOWN_ROLES:
-            roles.add(turn["speaker"])
+            role = normalize_speaker(turn["speaker"])
+            if role in KNOWN_ROLES:
+                mapped.add(f"{turn['speaker']} → {role}")
+            else:
+                roles.add(turn["speaker"])
 
     warnings = []
     if fields:
@@ -70,8 +75,13 @@ def check_record(record: Any) -> list[str]:
         warnings.append(f"незнакомые поля реплик не сохранены: {_names(turn_fields)}")
     if roles:
         warnings.append(f"незнакомые роли: {_names(roles)}")
-    if record["channel"] not in KNOWN_CHANNELS:
+    if mapped:
+        warnings.append(f"роли приведены к стандартным: {_names(mapped)}")
+    channel = normalize_channel(record["channel"])
+    if channel not in KNOWN_CHANNELS:
         warnings.append(f"незнакомый канал: {_clip(record['channel'])}")
+    elif channel != record["channel"]:
+        warnings.append(f"канал приведён к стандартному: {_clip(record['channel'])} → {channel}")
     return warnings
 
 

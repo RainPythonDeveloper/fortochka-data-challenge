@@ -158,3 +158,16 @@ def test_conversation_filters(client):
     assert [c["id"] for c in client.get("/conversations?channel=voice call").json()] == ["a"]
     assert [c["id"] for c in client.get("/conversations?language=KZ").json()] == ["b"]
     assert client.get("/conversations/none").status_code == 404
+
+
+def test_other_channel_and_role_labels_are_mapped_and_reported(client):
+    record = make_record(channel="Voice Call")
+    record["transcript"][0]["speaker"] = "Customer"
+    record["transcript"][1]["speaker"] = "agent"
+    body = client.post("/transcripts", json=record).json()
+    text = " ".join(body["warnings"])
+    assert body["channel"] == "voice call"
+    assert "Customer → client" in text and "agent → operator" in text and "Voice Call → voice call" in text
+    turns = client.get("/conversations/syn-001").json()["turns"]
+    assert [t["speaker"] for t in turns] == ["client", "operator", "operator"]
+    assert turns[0]["text"] == "Вопрос про тариф?"

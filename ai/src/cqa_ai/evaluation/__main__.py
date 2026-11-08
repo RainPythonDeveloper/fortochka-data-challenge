@@ -85,7 +85,7 @@ async def _run(args: argparse.Namespace) -> int:
         # "" keeps service.evaluate from filling the fallback in from the environment.
         fallback_model=fallback if fallback is not None else "",
         pipeline=getattr(args, "pipeline", "single"),
-        max_output_tokens=int(os.environ.get("LLM_MAX_OUTPUT_TOKENS", "8000")),
+        max_output_tokens=int(os.environ.get("LLM_MAX_OUTPUT_TOKENS", "64000")),
         second_model=getattr(args, "second_model", None) or "",
         arbiter_model=getattr(args, "arbiter_model", None) or "",
         second_criteria=[

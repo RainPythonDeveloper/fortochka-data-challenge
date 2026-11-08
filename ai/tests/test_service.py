@@ -75,3 +75,37 @@ def test_unknown_provider_fails_loudly():
                 EvaluatorConfig(provider="none", model="none"),
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [("voice call", "voice call"), ("Voice Call", "voice call"), ("call", "voice call"),
+     ("phone", "voice call"), ("Звонок", "voice call"), ("chat", "agent chat"),
+     ("Agent Chat", "agent chat"), ("чат", "agent chat"), ("email", "email")],
+)
+def test_channel_labels_map_to_known_channels(label, expected):
+    from cqa_ai import normalize_channel
+
+    assert normalize_channel(label) == expected
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [("operator", "operator"), ("Agent", "operator"), ("оператор", "operator"),
+     ("customer", "client"), ("Клиент", "client"), ("IVR", "bot"), ("supervisor", "supervisor")],
+)
+def test_speaker_labels_map_to_known_roles(label, expected):
+    from cqa_ai import normalize_speaker
+
+    assert normalize_speaker(label) == expected
+
+
+def test_snapshot_maps_labels_but_keeps_text():
+    record = {**RECORD, "channel": "Call", "transcript": [
+        {"timestamp": "2026-11-08T05:10:05.1234567+00:00", "speaker": "Customer", "text": "Где тариф?"},
+        {"timestamp": 12.5, "speaker": "Agent", "text": "Здравствуйте, я Анна."},
+    ]}
+    snapshot = snapshot_from_record(record)
+    assert snapshot.channel == "voice call"
+    assert [t.speaker for t in snapshot.turns] == ["client", "operator"]
+    assert [t.text for t in snapshot.turns] == ["Где тариф?", "Здравствуйте, я Анна."]
