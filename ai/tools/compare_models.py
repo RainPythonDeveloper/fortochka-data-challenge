@@ -1,4 +1,4 @@
-"""Builds a detailed three-model comparison from bench runs.
+"""Builds a detailed multi-model comparison from bench runs.
 
 Usage (from fortochka/ai):
     uv run python tools/compare_models.py > ../docs/MODEL_COMPARISON_DATA.md
@@ -123,7 +123,7 @@ def main():
     answered = [ids for ids in ok_ids.values() if ids]
     common = sorted(set.intersection(*answered)) if answered else []
     kind = "Чатов" if CHANNEL == "agent chat" else "Звонков"
-    print(f"{kind} в выборке (tune + compare): {len(all_ids)}; оценены всеми тремя: {len(common)}\n")
+    print(f"{kind} в выборке (tune + compare): {len(all_ids)}; оценены всеми моделями, у которых есть ответы: {len(common)}\n")
 
     stats = {}
     mismatch = defaultdict(dict)  # (cid, crit) -> {model: (value, justification)}

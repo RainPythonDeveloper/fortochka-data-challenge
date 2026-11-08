@@ -116,6 +116,8 @@ PAID_EQUIVALENT: dict[str, tuple[float, float]] = {
     "minimaxai/minimax-m3.1-flash": (0.075, 0.30),
     "moonshotai/kimi-k2.6": (0.65, 3.41),
     "openai/gpt-oss-20b": (0.03, 0.13),
+    "stepfun-ai/step-5-preview": (1.00, 2.70),
+    "z-ai/glm-5.3-flash": (0.15, 0.50),
 }
 PRICE_SOURCE = "openrouter.ai/api/v1/models, 2026-11-07"
 

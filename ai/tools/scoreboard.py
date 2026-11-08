@@ -1,4 +1,4 @@
-"""Scoreboard of the frozen configuration: chats vs calls, accuracy, speed, cost.
+"""Scoreboard of the chosen configuration (Super-VL, Ultra fallback): chats vs calls, accuracy, speed, cost.
 
 Usage (from fortochka/ai): uv run python tools/scoreboard.py > ../docs/SCOREBOARD_DATA.md
 
@@ -17,16 +17,18 @@ from cqa_ai import load_default_checklists
 from cqa_ai.evaluation.bench import latest_rows, summarize
 
 BENCH = Path(__file__).resolve().parents[2] / "data" / "bench"
+SUPERVL = "nvidia~nvidia_nemotron-3.5-super-vl-120b-a12b__single__r1"
 ULTRA = "nvidia~nvidia_nemotron-3-ultra-550b-a55b__single__r1"
 
+# (title, bench folders, channel, model run folder)
 GROUPS = [
-    ("Чаты · holdout (не видели при настройке)", ["HOLDOUT-clean"], "agent chat"),
-    ("Чаты · compare, прогон 1", ["s4-compare-A"], "agent chat"),
-    ("Чаты · compare, прогон 2", ["s7-ultra-repeat"], "agent chat"),
-    ("Чаты · tune", ["s3-tune-v3"], "agent chat"),
-    ("Звонки · tune + compare", ["s16-calls-v2"], "voice call"),
-    ("Звонки · holdout", ["HOLDOUT-call"], "voice call"),
-    ("Звонки · все 5", ["s16-calls-v2", "HOLDOUT-call"], "voice call"),
+    ("Чаты · holdout (не видели при настройке)", ["HOLDOUT-supervl"], "agent chat", SUPERVL),
+    ("Чаты · tune + compare", ["s17-final"], "agent chat", SUPERVL),
+    ("Звонки · tune + compare", ["s17-final"], "voice call", SUPERVL),
+    ("Звонки · holdout", ["HOLDOUT-supervl"], "voice call", SUPERVL),
+    ("Звонки · все 5", ["s17-final", "HOLDOUT-supervl"], "voice call", SUPERVL),
+    ("Для сравнения: Ultra, чаты · holdout", ["HOLDOUT-clean"], "agent chat", ULTRA),
+    ("Для сравнения: Ultra, звонки · все 5", ["s16-calls-v2", "HOLDOUT-call"], "voice call", ULTRA),
 ]
 
 COLUMNS = [
@@ -43,10 +45,10 @@ COLUMNS = [
 ]
 
 
-def rows_for(folders: list[str], channel: str) -> list[dict]:
+def rows_for(folders: list[str], channel: str, run: str) -> list[dict]:
     rows: list[dict] = []
     for folder in folders:
-        for path in glob.glob(str(BENCH / folder / ULTRA / "results.jsonl")):
+        for path in glob.glob(str(BENCH / folder / run / "results.jsonl")):
             rows += [json.loads(x) for x in Path(path).read_text(encoding="utf-8").splitlines() if x]
     return [r for r in latest_rows(rows) if r["channel"] == channel]
 
@@ -56,8 +58,8 @@ def main() -> None:
     ref = json.loads(Path("labels/reference_v3.json").read_text(encoding="utf-8"))
     checklist = next(c for c in load_default_checklists() if c.checklist_id == ref["checklist_id"])
     table = []
-    for title, folders, channel in GROUPS:
-        rows = rows_for(folders, channel)
+    for title, folders, channel, run in GROUPS:
+        rows = rows_for(folders, channel, run)
         if not rows:
             continue
         s = summarize(rows, ref["labels"], checklist)
