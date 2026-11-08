@@ -35,3 +35,6 @@ dist/
 
 # Local worktrees for parallel branches
 .worktrees/
+
+video/
+.claude
