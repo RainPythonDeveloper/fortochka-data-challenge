@@ -143,8 +143,30 @@ cd frontend && npm run build
 
 ```bash
 cd backend
-uv run python -m cqa_backend.control --group-id <значение от организаторов>
+uv run python -m cqa_backend.control --group-id <значение от организаторов> --results-file ../results/prod/results.json
 ```
+
+Команда пишет файл для сдачи `results/prod/results.json` в формате организаторов (JSON 1.0) и проверяет его: ровно 10 записей, без повторов ID, у каждой оценённой записи все 8 критериев, итог от 0 до 100. Затем его нужно закоммитить и запушить до стоп-кода:
+
+```bash
+git add results/prod/results.json
+```
+
+```bash
+git commit -m "Control results"
+```
+
+```bash
+git push
+```
+
+Файл по DEV (`results/dev/results.json`, 65 записей) собирается так же из базы, где оценён DEV:
+
+```bash
+uv run python -m cqa_backend.results_file --group-id DEV --out ../results/dev/results.json --expected-records 65
+```
+
+Формат: `criterion_id` — `contact`, `discovery`, `identification`, `consultation`, `empathy`, `dialogue`, `closure`, `critical`; `value` — `true`/`false`, ступень шкалы или `null` для N/A; `evidence_turns` нумеруются с 1 по исходному массиву реплик; `score.final_score` — итог по чек-листу, `score.critical_flag` — грубое нарушение. Диалог без оценки получает `status: "error"`, пустые критерии, `score: null` и причину. В файл идёт исходная AI-оценка, без учёта апелляций. У звонков `rationale` — текст сработавшего правила рубрики, а не слова модели: в расшифровках есть персональные данные.
 
 Звонков в контрольном наборе нет. Если звонок всё же придёт, он не уйдёт в облачную модель (`CQA_ALLOW_VOICE_TO_CLOUD=0`) и получит статус «не отправлен в модель»; это не сбой, а политика приватности. `control` пишет оценки в ту же базу `backend/cqa.sqlite`, что и backend, поэтому результаты сразу видны в интерфейсе.
 
