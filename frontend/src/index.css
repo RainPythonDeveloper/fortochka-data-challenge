@@ -230,6 +230,48 @@ label:has(input) {
   color: var(--color-faint);
 }
 
+.set-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--color-chip);
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.set-tag[data-set='prod'] {
+  background: var(--color-green-soft);
+  color: var(--color-green-deep);
+}
+
+.set-tag[data-set='other'] {
+  background: var(--color-amber-soft);
+  color: var(--color-amber-text);
+}
+
+.drow__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.field.tabs-row__set {
+  flex: none;
+  width: 170px;
+  margin-left: auto;
+}
+
+.field.tabs-row__set + .tabs-row__search {
+  margin-left: 0;
+}
+
 .verdict {
   display: inline-flex;
   align-items: center;
@@ -911,7 +953,7 @@ label:has(input) {
 
 .drow {
   display: grid;
-  grid-template-columns: 132px 104px 68px 92px minmax(0, 1fr) 76px;
+  grid-template-columns: 132px 60px 104px 68px 92px minmax(0, 1fr) 76px;
   align-items: center;
   gap: 16px;
   height: 54px;
@@ -1331,6 +1373,47 @@ label:has(input) {
   background: #ffffff;
   box-shadow: 0 0 0 2.5px var(--color-ink), 0 2px 6px rgb(14 21 28 / 0.18);
   transition: left 800ms var(--ease-out-soft) 300ms;
+}
+
+/* Dialogue header: the verdict as a banner, the total beside it, the bar under both. */
+.score {
+  width: 400px;
+}
+
+.score .score__top {
+  align-items: center;
+}
+
+.score .score__gross,
+.score .verdict[data-size='large'] {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 14px;
+  font-size: 17px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.score .verdict[data-verdict='critical'] { background: var(--color-red-soft); }
+.score .verdict[data-verdict='low'] { background: #fbeae2; }
+.score .verdict[data-verdict='mid'] { background: var(--color-amber-soft); }
+.score .verdict[data-verdict='high'] { background: var(--color-green-soft); }
+
+.score .range {
+  height: 8px;
+}
+
+.score .range__band {
+  border-radius: 4px;
+}
+
+.score .range__mark {
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
 }
 
 .score__sub {
@@ -2523,7 +2606,7 @@ mark.quote {
   }
 
   .drow {
-    grid-template-columns: 120px 100px 64px 88px 200px 76px;
+    grid-template-columns: 120px 56px 100px 64px 88px 200px 76px;
     width: max-content;
   }
 

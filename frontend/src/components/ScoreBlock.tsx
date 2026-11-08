@@ -43,7 +43,7 @@ export function ScoreBlock({ run, running, reveal }: { run: EvaluationRun | null
       <div className="score__top">
         {gross ? (
           <span className="score__gross" role="status" title="Грубое нарушение отмечается отдельно и не меняет итог по чек-листу">
-            <ShieldAlert size={16} strokeWidth={2} aria-hidden /> {GROSS}
+            <ShieldAlert size={19} strokeWidth={2} aria-hidden /> {GROSS}
           </span>
         ) : verdict && (
           <span className="verdict" data-verdict={verdict.id} data-size="large" title={LEGEND}>

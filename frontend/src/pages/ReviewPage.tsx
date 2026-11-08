@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import type { ChecklistVersion, ConversationDetail, EvaluationRun, EvaluationSummary } from '../api/types';
 import { ChannelMark } from '../components/ChannelMark';
+import { SetTag } from '../components/SetTag';
 import { CompareDialog } from '../components/CompareDialog';
 import { CriteriaList } from '../components/CriteriaList';
 import { EvidenceLink } from '../components/EvidenceLink';
@@ -244,6 +245,7 @@ function ReviewView({ id }: { id: string }) {
               )}
             </div>
             <span className="rhead__meta">
+              <SetTag groupId={detail.group_id} />
               <ChannelMark channel={detail.channel} language={languageLabel(detail.language)} />
               {shownRun && isStubRun(shownRun) && <Tag tone="amber">{MOCK_LABEL}</Tag>}
               {audioNotice && <span role="status" className="notice">{audioNotice}</span>}

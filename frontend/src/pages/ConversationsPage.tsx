@@ -17,6 +17,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import type { Appeal, ChecklistVersion, ConversationSummary, EvaluationRun, ImportResult } from '../api/types';
 import { ChannelMark } from '../components/ChannelMark';
+import { SetTag } from '../components/SetTag';
 import { StatsPanel } from '../components/DashboardRail';
 import { Button, EmptyState, ErrorState, LoadingState, Menu, Panel, Spinner, Swap } from '../components/ui';
 import { host } from '../host/hostAdapter';
@@ -196,6 +197,7 @@ function DialogRow({ row, progress, finished, entering, onEvaluate }: RowProps) 
         <Link className="drow__id" to={href} onClick={(event) => event.stopPropagation()}>{row.id}</Link>
         {time && <span className="drow__time" data-now={progress || finished ? '' : undefined}>{time}</span>}
       </span>
+      <span><SetTag groupId={row.group_id} /></span>
       <ChannelMark channel={row.channel} language={row.language} />
       {progress ? (
         <RunningCells progress={progress} />
@@ -625,6 +627,7 @@ export function ConversationsPage() {
           <Panel className="dialogs" data-over={dragging || undefined}>
             <div className="drow drow--head">
               <SortHead sort={sort} id="when" label="Диалог, время" onSort={setSort} />
+              <span>Набор</span>
               <span>Канал</span>
               <SortHead sort={sort} id="total" label="Итог" onSort={setSort} end />
               <span>Оценка</span>
