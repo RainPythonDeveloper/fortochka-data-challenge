@@ -35,6 +35,9 @@ from cqa_backend.schemas import EvaluationRequest
 ERROR_PREVIEW = 120
 
 
+PROD_RESULTS = REPO_ROOT / "results" / "prod" / "results.json"
+
+
 class ControlError(Exception):
     """The run stopped before results could be trusted."""
 
@@ -297,9 +300,19 @@ def parse_args(argv: list[str] | None = None) -> ControlOptions:
     parser.add_argument(
         "--results-file",
         type=Path,
-        help="файл для сдачи в формате организаторов, например ../results/prod/results.json",
+        help="файл для сдачи в формате организаторов; для контрольной группы по умолчанию "
+        "results/prod/results.json, для DEV не пишется без этого флага",
+    )
+    parser.add_argument(
+        "--no-results-file", action="store_true", help="не писать файл для сдачи"
     )
     values = vars(parser.parse_args(argv))
+    # The control group writes the submission file without a flag. DEV never does by
+    # default: a rehearsal must not overwrite the DEV file that is already submitted.
+    if values.pop("no_results_file"):
+        values["results_file"] = None
+    elif values["results_file"] is None and values["group_id"].strip().upper() != "DEV":
+        values["results_file"] = PROD_RESULTS
     pairs = values.pop("checklist_for") or []
     if pairs and values["checklist_id"]:
         parser.error("--checklist-for нельзя сочетать с --checklist-id")

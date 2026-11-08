@@ -253,3 +253,15 @@ def test_control_writes_the_submission_file(settings, tmp_path):
     assert not [item for item in report.warnings if item.startswith("results.json")]
     assert f"Файл для сдачи: {target}" in format_report(report)
     assert parse_args(["--group-id", "X", "--results-file", "r.json"]).results_file.name == "r.json"
+
+
+def test_control_group_writes_the_prod_file_by_default_dev_does_not():
+    from cqa_backend.control import PROD_RESULTS
+
+    assert parse_args(["--group-id", "CTRL-1"]).results_file == PROD_RESULTS
+    assert PROD_RESULTS.parts[-3:] == ("results", "prod", "results.json")
+    assert parse_args(["--group-id", "DEV"]).results_file is None
+    assert parse_args(["--group-id", "dev"]).results_file is None
+    assert parse_args(["--group-id", "CTRL", "--no-results-file"]).results_file is None
+    custom = parse_args(["--group-id", "DEV", "--results-file", "x.json"]).results_file
+    assert custom.name == "x.json"
