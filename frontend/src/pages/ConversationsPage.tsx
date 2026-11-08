@@ -4,6 +4,7 @@ import {
   ArrowRight,
   ArrowUp,
   CheckCircle2,
+  ChevronsUpDown,
   Gavel,
   MoreHorizontal,
   Play,
@@ -17,7 +18,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import type { Appeal, ChecklistVersion, ConversationSummary, EvaluationRun, ImportResult } from '../api/types';
 import { ChannelMark } from '../components/ChannelMark';
-import { SetTag } from '../components/SetTag';
+import { SetTag, setOf } from '../components/SetTag';
 import { StatsPanel } from '../components/DashboardRail';
 import { Button, EmptyState, ErrorState, LoadingState, Menu, Panel, Spinner, Swap } from '../components/ui';
 import { host } from '../host/hostAdapter';
@@ -295,6 +296,8 @@ export function ConversationsPage() {
   const [verdict, setVerdict] = useState<VerdictId | null>(null);
   const [appealOwners, setAppealOwners] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
+  // '*' shows every data set; otherwise the group a dialogue was imported with.
+  const [dataSet, setDataSet] = useState('*');
   const [dragging, setDragging] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [imported, setImported] = useState<ImportResult | null>(null);
@@ -364,8 +367,18 @@ export function ConversationsPage() {
     [items, appealOwners],
   );
 
+  const setKeys = useMemo(
+    () => [...new Set(items.map((item) => setOf(item.group_id).key))].sort((a, b) => setOf(a).label.localeCompare(setOf(b).label)),
+    [items],
+  );
+  const nextSet = () => {
+    const order = ['*', ...setKeys];
+    setDataSet(order[(order.indexOf(dataSet) + 1) % order.length]);
+  };
+
   const rows = useMemo(() => {
-    const built = items.map((item) => toRow(item, runs[item.id], appealList.filter((appeal) => ownerOf(appeal) === item.id)));
+    const picked = dataSet === '*' ? items : items.filter((item) => setOf(item.group_id).key === dataSet);
+    const built = picked.map((item) => toRow(item, runs[item.id], appealList.filter((appeal) => ownerOf(appeal) === item.id)));
     const direction = sort.descending ? 1 : -1;
     const rank = (row: Row) => (fresh.has(row.id) ? 2 : row.evaluatedAt ? 1 : 0);
     return built.sort((a, b) => {
@@ -379,7 +392,7 @@ export function ConversationsPage() {
         : (b.evaluatedAt ?? '').localeCompare(a.evaluatedAt ?? '');
       return order * direction || a.id.localeCompare(b.id);
     });
-  }, [items, runs, appealList, ownerOf, fresh, sort]);
+  }, [items, dataSet, runs, appealList, ownerOf, fresh, sort]);
 
   const needle = search.trim().toLowerCase();
   const countOf = (id: Tab) => rows.filter(TAB_FILTERS[id]).length;
@@ -627,7 +640,18 @@ export function ConversationsPage() {
           <Panel className="dialogs" data-over={dragging || undefined}>
             <div className="drow drow--head">
               <SortHead sort={sort} id="when" label="Диалог, время" onSort={setSort} />
-              <span>Набор</span>
+              <span>
+                <button
+                  type="button"
+                  data-on={dataSet !== '*' || undefined}
+                  aria-label="Сменить набор данных"
+                  title="Нажмите, чтобы показать только DEV, PROD или SWAP"
+                  onClick={nextSet}
+                >
+                  {dataSet === '*' ? 'Набор' : setOf(dataSet).label}
+                  <ChevronsUpDown size={13} strokeWidth={1.75} />
+                </button>
+              </span>
               <span>Канал</span>
               <SortHead sort={sort} id="total" label="Итог" onSort={setSort} end />
               <span>Оценка</span>
@@ -664,7 +688,11 @@ export function ConversationsPage() {
           counts={verdictCounts}
           active={verdict}
           onVerdict={setVerdict}
-          results={exported.data}
+          results={
+            exported.data && dataSet !== '*'
+              ? { ...exported.data, results: exported.data.results.filter((item) => setOf(item.group_id).key === dataSet) }
+              : exported.data
+          }
           sheets={sheets.data ?? []}
         />
       </div>
