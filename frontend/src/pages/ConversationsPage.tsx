@@ -33,7 +33,7 @@ import {
 import { isActive, progressFor, useJobs, type Progress } from '../lib/jobs';
 import { FROM_CACHE, GROSS, stageName } from '../lib/labels';
 import { useCountUp, useElapsed } from '../lib/motion';
-import { VERDICTS, shownTotal, verdictOf, type VerdictId } from '../lib/scoreBands';
+import { VERDICTS, verdictOf, type VerdictId } from '../lib/scoreBands';
 import { useAsync } from '../lib/useAsync';
 
 const REFRESH_MS = 3000;
@@ -55,7 +55,7 @@ type Row = ConversationSummary & {
   evaluatedAt: string | null;
   appeal: Appeal | null;
   openAppeals: number;
-  /** What the screen shows: a gross violation zeroes it. */
+  /** The checklist total; a gross violation is shown separately. */
   total: number | null;
   verdict: ReturnType<typeof verdictOf>;
 };
@@ -74,7 +74,7 @@ function toRow(item: ConversationSummary, run: EvaluationRun | undefined, own: A
     evaluatedAt: (known ? item.latest_evaluated_at : run?.created_at) ?? null,
     appeal: own[0] ?? null,
     openAppeals: item.open_appeals ?? own.length,
-    total: shownTotal(item.latest_total, item.gross_error),
+    total: item.latest_total,
     verdict: verdictOf(item.latest_total, item.gross_error),
   };
 }

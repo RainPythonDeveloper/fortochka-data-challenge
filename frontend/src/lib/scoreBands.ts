@@ -17,11 +17,10 @@ export const VERDICTS = [
 export type VerdictId = (typeof VERDICTS)[number]['id'];
 
 /**
- * What a reviewer sees. A gross violation zeroes the total on screen only: the
- * official checklist keeps it separate, so runs and exports stay as calculated.
+ * The total on screen is the checklist total. A gross violation does not change
+ * it: the checklist marks it separately, so the screen shows a red badge instead.
+ * The verdict «Критично» only classifies the dialogue for lists and filters.
  */
-export const shownTotal = (total: number | null, gross: boolean) => (gross ? 0 : total);
-
 export function verdictOf(total: number | null, gross: boolean) {
   if (gross) return VERDICTS[0];
   if (total === null) return null;

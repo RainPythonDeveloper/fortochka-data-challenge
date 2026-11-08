@@ -112,7 +112,7 @@ function Group({ title, hint, children }: { title: string; hint: string; childre
 function PointsPreview({ criterion }: { criterion: Criterion }) {
   const weight = Number.isFinite(criterion.weight) ? criterion.weight : 0;
   const rows: [string, string][] = criterion.flag
-    ? [['Да', 'Итог на экране равен 0, экспорт по чек-листу'], ['Нет', 'Итог не меняется']]
+    ? [['Да', 'Итог не меняется, нарушение отмечается отдельно'], ['Нет', 'Итог не меняется']]
     : !criterion.scored
       ? [['Любой ответ', 'На итог не влияет']]
       : criterion.type === 'scale' && criterion.levels.some((level) => level.value > 0)
@@ -328,7 +328,7 @@ function CriterionEditor({ criterion, saved, sections, errors, deleteBlock, fres
           <SwitchRow title="Влияет на баллы" hint="Выключите, если критерий только отмечает факт.">
             <Toggle on={criterion.scored} label="Влияет на баллы" disabled={isFlag} onChange={(scored) => onChange({ scored, weight: scored ? criterion.weight || NEW_WEIGHT : 0 })} />
           </SwitchRow>
-          <SwitchRow title="Флаг грубого нарушения" hint="Ответ «Да» значит нарушение и обнуляет итог на экране.">
+          <SwitchRow title="Флаг грубого нарушения" hint="Ответ «Да» значит нарушение. Итог не меняется, нарушение отмечается отдельно красной плашкой.">
             <Toggle
               on={isFlag}
               label="Флаг грубого нарушения"

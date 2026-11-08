@@ -99,8 +99,8 @@ function Impact({ criterion, result, score, official, notApplicable }: ImpactPro
   if (criterion.flag) {
     return result.answer === 'yes' ? (
       <>
-        <span className="impact__delta">Итог обнулён</span>
-        <p className="why__small">На экране итог равен 0. По чек-листу {fmtScore(official)}, так он уходит в экспорт.</p>
+        <span className="impact__delta">Итог не меняется, нарушение отмечено отдельно</span>
+        <p className="why__small">Итог по чек-листу {fmtScore(official)}: грубое нарушение на баллы не влияет и показано красной плашкой у итога.</p>
       </>
     ) : (
       <p className="why__small">Нарушений нет, итог не меняется.</p>
@@ -308,7 +308,7 @@ function sectionResult(section: SectionScore | undefined, incomplete: boolean): 
 }
 
 function Points({ score, criterion, result }: { score?: CriterionScore; criterion: Criterion; result?: CriterionResult }) {
-  if (criterion.flag) return <span className="crit__points">{result?.answer === 'yes' ? 'обнуляет итог' : 'без баллов'}</span>;
+  if (criterion.flag) return <span className="crit__points">{result?.answer === 'yes' ? 'нарушение, без баллов' : 'без баллов'}</span>;
   if (!criterion.scored) return <span className="crit__points">без баллов</span>;
   if (score?.points === null || score?.points === undefined) return <span className="crit__points" />;
   return <span className="crit__points"><b>{fmtScore(score.points)}</b> из {fmtScore(score.effective_weight)}</span>;

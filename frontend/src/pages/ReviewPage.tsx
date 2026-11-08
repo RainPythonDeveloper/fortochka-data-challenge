@@ -1,4 +1,4 @@
-import { Headphones, History, ShieldAlert } from 'lucide-react';
+import { Headphones, History } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
@@ -18,7 +18,7 @@ import { Button, EmptyState, ErrorState, LoadingState, Panel, Tag } from '../com
 import { host } from '../host/hostAdapter';
 import { PERSONAL_DATA_FLAG, channelLabel, errorText, isStubRun, languageLabel, visibleFlags } from '../lib/format';
 import { progressFor, useJobs } from '../lib/jobs';
-import { GROSS, MOCK_LABEL } from '../lib/labels';
+import { MOCK_LABEL } from '../lib/labels';
 import { reducedMotion } from '../lib/motion';
 import { useAsync } from '../lib/useAsync';
 
@@ -245,9 +245,6 @@ function ReviewView({ id }: { id: string }) {
             </div>
             <span className="rhead__meta">
               <ChannelMark channel={detail.channel} language={languageLabel(detail.language)} />
-              {shownRun?.final_score.gross_error && (
-                <Tag tone="bad"><ShieldAlert size={15} strokeWidth={1.75} aria-hidden /> {GROSS}</Tag>
-              )}
               {shownRun && isStubRun(shownRun) && <Tag tone="amber">{MOCK_LABEL}</Tag>}
               {audioNotice && <span role="status" className="notice">{audioNotice}</span>}
             </span>

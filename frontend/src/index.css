@@ -1285,8 +1285,17 @@ label:has(input) {
   color: var(--color-text);
 }
 
-.score__num[data-zero] {
-  color: var(--color-red-text);
+.score__gross {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--color-red-text);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .range {

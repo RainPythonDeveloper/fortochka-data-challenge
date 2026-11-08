@@ -220,6 +220,9 @@ def main():
         s["evidence_avg"] = round(statistics.mean(ev_items), 2) if ev_items else 0
         s["p50"], s["p95"] = q(model_secs, 0.5), q(model_secs, 0.95)
         s["wall_p50"] = q(walls, 0.5)
+        s["mean"] = round(statistics.mean(model_secs), 1) if model_secs else None
+        s["wall_mean"] = round(statistics.mean(walls), 1) if walls else None
+        s["wall_p95"] = q(walls, 0.95)
         s["calls"] = round(statistics.mean(calls), 2) if calls else None
         s["tin"] = round(statistics.mean(tin)) if tin else None
         s["tout"] = round(statistics.mean(tout)) if tout else None
@@ -256,9 +259,12 @@ def main():
         ("Починок контракта (диалогов)", "repairs"),
         ("Переходов на запасную модель", "fallbacks"),
         ("Технические ошибки по типам", "err_types"),
+        ("Длительность ответа модели, среднее, с", "mean"),
         ("Время модели p50, с", "p50"),
         ("Время модели p95, с", "p95"),
+        ("Длительность оценки с очередью, среднее, с", "wall_mean"),
         ("Время с очередью p50, с", "wall_p50"),
+        ("Время с очередью p95, с", "wall_p95"),
         ("Вызовов на диалог", "calls"),
         ("Токенов на вход / диалог", "tin"),
         ("Токенов на выход / диалог", "tout"),

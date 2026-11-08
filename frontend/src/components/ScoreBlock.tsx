@@ -1,7 +1,9 @@
+import { ShieldAlert } from 'lucide-react';
 import type { EvaluationRun } from '../api/types';
 import { fmtScore } from '../lib/format';
 import { useCountUp } from '../lib/motion';
-import { VERDICTS, shownTotal, verdictOf } from '../lib/scoreBands';
+import { GROSS } from '../lib/labels';
+import { VERDICTS, verdictOf } from '../lib/scoreBands';
 import { Swap } from './ui';
 
 const LEGEND = VERDICTS.map((item) => `${item.name}: ${item.hint}`).join('\n');
@@ -21,8 +23,7 @@ export function RangeBar({ value }: { value: number | null }) {
 function subline(run: EvaluationRun | null, running: boolean): string {
   if (running || !run) return 'из 100';
   if (run.status === 'failed') return 'оценка не выполнена';
-  const { total, partial_total: partial, gross_error: gross } = run.final_score;
-  if (gross) return `по чек-листу ${fmtScore(total ?? partial)}`;
+  const { total, partial_total: partial } = run.final_score;
   if (total === null) return partial !== null ? 'частичный итог' : 'итог не рассчитан';
   const original = run.score.total;
   return original !== total && original !== null ? `исходная ${fmtScore(original)}` : 'из 100';
@@ -32,7 +33,7 @@ function subline(run: EvaluationRun | null, running: boolean): string {
 export function ScoreBlock({ run, running, reveal }: { run: EvaluationRun | null; running: boolean; reveal: boolean }) {
   const score = run?.status === 'done' && !running ? run.final_score : null;
   const gross = Boolean(score?.gross_error);
-  const total = score ? shownTotal(score.total, gross) : null;
+  const total = score ? score.total : null;
   const partial = total === null ? (score?.partial_total ?? null) : null;
   const verdict = score ? verdictOf(score.total, gross) : null;
   const shown = useCountUp(total, { fromZero: reveal, delay: reveal ? 0 : 300 });
@@ -40,12 +41,16 @@ export function ScoreBlock({ run, running, reveal }: { run: EvaluationRun | null
   return (
     <div className="score">
       <div className="score__top">
-        {verdict && (
+        {gross ? (
+          <span className="score__gross" role="status" title="Грубое нарушение отмечается отдельно и не меняет итог по чек-листу">
+            <ShieldAlert size={16} strokeWidth={2} aria-hidden /> {GROSS}
+          </span>
+        ) : verdict && (
           <span className="verdict" data-verdict={verdict.id} data-size="large" title={LEGEND}>
             {verdict.name}
           </span>
         )}
-        <div className="score__num" data-dim={total === null || undefined} data-zero={gross || undefined}>
+        <div className="score__num" data-dim={total === null || undefined}>
           {total !== null ? fmtScore(shown) : partial !== null ? fmtScore(partial) : '—'}
         </div>
       </div>

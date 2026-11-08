@@ -29,7 +29,7 @@ export function ScoreBreakdown({ run, checklist, openId, onToggle }: Props) {
       {gross && (
         <button type="button" className="breakdown__gross" onClick={() => flagged && openId !== flagged && onToggle(flagged)}>
           <ShieldAlert size={16} strokeWidth={1.75} aria-hidden />
-          Грубое нарушение обнуляет итог. Открыть основание
+          Грубое нарушение: отмечается отдельно, итог не меняет. Открыть основание
         </button>
       )}
       <p className="breakdown__line">
