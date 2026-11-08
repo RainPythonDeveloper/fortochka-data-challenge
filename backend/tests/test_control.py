@@ -241,3 +241,15 @@ def test_cli_stops_with_a_masked_reason(monkeypatch, capsys, tmp_path):
     code = main(["--group-id", "CTRL", "--out-dir", str(tmp_path / "out")])
     assert code == 2
     assert "LLM_PROVIDER" in capsys.readouterr().err
+
+
+def test_control_writes_the_submission_file(settings, tmp_path):
+    target = tmp_path / "results" / "prod" / "results.json"
+    report = control(settings, options(tmp_path, results_file=target), evaluator=CountingEvaluator())
+
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert report.ok and report.results_path == target
+    assert len(data["results"]) == 10 and all(item["status"] == "ok" for item in data["results"])
+    assert not [item for item in report.warnings if item.startswith("results.json")]
+    assert f"Файл для сдачи: {target}" in format_report(report)
+    assert parse_args(["--group-id", "X", "--results-file", "r.json"]).results_file.name == "r.json"
