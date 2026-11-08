@@ -7,6 +7,8 @@ from cqa_ai.service import (
     content_hash,
     evaluate,
     load_default_checklists,
+    normalize_channel,
+    normalize_speaker,
     snapshot_from_record,
 )
 
@@ -18,5 +20,7 @@ __all__ = [
     "content_hash",
     "evaluate",
     "load_default_checklists",
+    "normalize_channel",
+    "normalize_speaker",
     "snapshot_from_record",
 ]

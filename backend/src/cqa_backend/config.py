@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     llm_pipeline: str = "single"
     llm_second_model: str | None = None
     # Reasoning models spend many tokens before the JSON; 8000 can truncate it.
-    llm_max_output_tokens: int = Field(default=8000, ge=1000)
+    llm_max_output_tokens: int = Field(default=24000, ge=1000)
     llm_arbiter_model: str | None = None
     llm_second_criteria: str | None = None
 

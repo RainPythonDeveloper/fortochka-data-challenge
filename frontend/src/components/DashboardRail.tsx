@@ -11,21 +11,32 @@ function shareOfFull(answer: unknown, top: number | null): number | null {
 
 type CriterionRow = { id: string; title: string; weight: number; mean: number; rated: number };
 
+/**
+ * Each answer is read against the criterion of its own checklist. A copy of a sheet
+ * can reuse an id with another meaning or scale, so rows are keyed by title and
+ * weight: the chat and voice versions of one criterion merge, a changed one stays apart.
+ */
 function criterionRows(results: ExportResult | null, sheets: ChecklistVersion[]): CriterionRow[] {
-  const criteria = new Map(sheets.flatMap((sheet) => sheet.criteria).filter((item) => item.scored && !item.flag).map((item) => [item.id, item]));
-  const done = results?.results.filter((item) => item.status === 'done') ?? [];
-  return [...criteria.values()]
-    .flatMap((criterion) => {
+  const byId = new Map(sheets.map((sheet) => [sheet.checklist_id, sheet]));
+  const rows = new Map<string, { id: string; title: string; weight: number; shares: number[] }>();
+  for (const item of results?.results ?? []) {
+    if (item.status !== 'done' || !item.checklist_id) continue;
+    const sheet = byId.get(item.checklist_id);
+    if (!sheet) continue;
+    for (const criterion of sheet.criteria) {
+      if (!criterion.scored || criterion.flag) continue;
+      const entry = item.criteria.find((candidate) => candidate.criterion_id === criterion.id);
       const top = criterion.type === 'scale' ? maxLevel(criterion) : null;
-      const shares = done.flatMap((item) => {
-        const entry = item.criteria.find((candidate) => candidate.criterion_id === criterion.id);
-        const share = entry?.status === 'assessed' ? shareOfFull(entry.answer, top) : null;
-        return share === null ? [] : [share];
-      });
-      if (!shares.length) return [];
-      const mean = shares.reduce((sum, value) => sum + value, 0) / shares.length;
-      return [{ id: criterion.id, title: criterion.title, weight: criterion.weight, mean, rated: shares.length }];
-    })
+      const share = entry?.status === 'assessed' ? shareOfFull(entry.answer, top) : null;
+      if (share === null || share > 1) continue;
+      const key = `${criterion.title}|${criterion.weight}`;
+      const row = rows.get(key) ?? { id: key, title: criterion.title, weight: criterion.weight, shares: [] };
+      row.shares.push(share);
+      rows.set(key, row);
+    }
+  }
+  return [...rows.values()]
+    .map(({ shares, ...row }) => ({ ...row, mean: shares.reduce((sum, value) => sum + value, 0) / shares.length, rated: shares.length }))
     .sort((a, b) => a.mean - b.mean);
 }
 
